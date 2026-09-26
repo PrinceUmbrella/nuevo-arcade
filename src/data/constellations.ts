@@ -34,9 +34,23 @@
  *                       crosses the top lane; it only counts over `column`.
  *  - cipher             Optional. Clue sections are shown Vigenere-encrypted
  *                       with `key` until players type the key. (Unused now.)
- *  - hints              Revealed in order after a decrypt wait, or immediately
- *                       every 3 misses. 6 misses in a sector starts a reboot
- *                       before the sector restarts (timings live in state.ts).
+ *  - sway               Optional. Grid sway as a fraction of DRIFT_AMPLITUDE
+ *                       (0 = still, 1 = full, the default).
+ *  - flak               Optional. false stops aliens firing at the cannon.
+ *                       Defaults to true. sway and flak are ignored with
+ *                       ?rules=classic, which always uses full sway and flak.
+ *  - hints              Revealed in order: free on request, or automatically
+ *                       every 3 misses. There is no clock. The LAST hint should
+ *                       be the strongest (it may give a star away): it stays
+ *                       locked until the team makes a wrong deduction in that
+ *                       sector (nextHintLocked in state.ts). 6 misses in a sector
+ *                       restarts it (MAX_WRONG_HITS in state.ts). Only a wrong
+ *                       deduction counts as a miss; a shot fired without LOCK
+ *                       is deflected and costs nothing but a short cooldown.
+ *  - classicHints       Optional. The original hint text, shown only with
+ *                       ?rules=classic (which also brings back the timer, the
+ *                       +1:00 hint penalty and the leaderboard).
+ *                       Delete these once the classic rules are retired.
  *  - acceptedNames      Answers accepted for hidden rounds. Case, spaces and
  *                       punctuation are ignored.
  *
@@ -74,6 +88,9 @@ export const ROUNDS: Round[] = [
     ],
     keyFragment: 'MAP',
     guideLine: true,
+    // The tutorial sector holds still so teams can learn to aim before sway and flak arrive.
+    sway: 0,
+    flak: false,
     lines: [
       [0, 1],
       [1, 2],
@@ -88,7 +105,12 @@ export const ROUNDS: Round[] = [
         ],
       },
     ],
-    hints: ['Straight line, even steps.', 'Mintaka is (3,5). Walk the line.', 'Alnilam is (4,4).'],
+    hints: [
+      'Facts you may need: Earth is planet 3, the IAU recognizes 5 dwarf planets, Jupiter is planet 5, and it has 4 Galilean moons.',
+      "Even steps: the middle star's column is halfway between 3 and 5, and each step right drops one row.",
+      'The belt is (3,5), (4,4), (5,3).',
+    ],
+    classicHints: ['Straight line, even steps.', 'Mintaka is (3,5). Walk the line.', 'Alnilam is (4,4).'],
     acceptedNames: [],
   },
   {
@@ -112,7 +134,7 @@ export const ROUNDS: Round[] = [
       [3, 4],
     ],
     decoys: [{ cell: [8, 7], letter: 'X' }],
-    // The board randomizes both streams whenever the sector starts.
+    // Cards are deliberately shuffled: pairing them in print order gives wrong cells.
     board: {
       slots: 5,
       columnCards: [
@@ -194,6 +216,11 @@ export const ROUNDS: Round[] = [
       },
     ],
     hints: [
+      'Beacons 1 to 4 make a box; the rest trail off like a handle.',
+      "Beacon 1: Mercury is planet 1, and 8 planets minus Earth leaves 7. The beacon letters spell a star's name.",
+      'Beacon 3 is (3,4).',
+    ],
+    classicHints: [
       'Beacons 1 to 4 make a box; the rest trail off like a handle.',
       "Fire in beacon order. Letters should spell a star's name.",
       'Beacon 3 is (3,4).',

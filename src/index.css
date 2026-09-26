@@ -104,7 +104,7 @@ h3 {
 
 .topbar {
   display: grid;
-  grid-template-columns: 1.8fr 0.8fr 1fr;
+  grid-template-columns: 1.6fr 0.8fr 1fr 1fr;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   background: rgba(2, 6, 20, 0.72);
@@ -131,6 +131,10 @@ h3 {
   text-align: center;
 }
 
+.topbar-block.right {
+  text-align: right;
+}
+
 .topbar-block .value.sector-name {
   font-size: 26px;
 }
@@ -143,6 +147,11 @@ h3 {
 
 .topbar-block .value.hits {
   color: var(--cyan);
+}
+
+.topbar-block .value.timer.standby {
+  color: var(--slate);
+  text-shadow: none;
 }
 
 .shields {
@@ -409,37 +418,6 @@ h3 {
 
 .comm.warn {
   color: var(--amber);
-}
-
-.decrypt-wait {
-  padding: 10px var(--space-4);
-  color: var(--amber);
-  font-family: var(--pixel);
-  font-size: 14px;
-  background: rgba(255, 209, 102, 0.06);
-}
-
-.decrypt-wait-label {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.wait-track {
-  height: 14px;
-  padding: 2px;
-  border: 2px solid currentColor;
-  background: rgba(0, 0, 0, 0.55);
-}
-
-.wait-track > span {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: currentColor;
-  box-shadow: 0 0 10px currentColor;
-  transform-origin: left center;
-  transition: transform 250ms linear;
 }
 
 .cursor {
@@ -752,9 +730,30 @@ h3 {
   margin-top: -18px;
 }
 
+.victory-rank {
+  color: var(--amber);
+}
+
 .victory .restarts {
   font-size: 26px;
   color: var(--slate);
+}
+
+.victory .restarts .penalty {
+  color: var(--red);
+}
+
+.victory-board {
+  width: 520px;
+  text-align: left;
+}
+
+.victory-board h3,
+.lobby-board h2 {
+  font-family: var(--pixel);
+  font-size: 20px;
+  color: var(--cyan);
+  margin-bottom: 16px;
 }
 
 .victory-title {
@@ -795,9 +794,67 @@ h3 {
   color: #fff;
 }
 
+.victory-time .restarts {
+  font-size: 18px;
+  color: var(--slate);
+}
+
 .victory-note {
   font-size: 36px;
   color: #cfd8e8;
+}
+
+/* ---------------------------------------------------------------- leaderboard */
+
+.leaderboard {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.leaderboard li {
+  display: grid;
+  grid-template-columns: 2.2em 1fr auto;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 12px;
+  font-size: 32px;
+  color: #e6edf7;
+  background: rgba(3, 12, 20, 0.7);
+  border: 2px solid transparent;
+}
+
+.leaderboard li:first-child {
+  color: var(--amber);
+}
+
+.leaderboard li.mine {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.leaderboard .rank {
+  font-family: var(--pixel);
+  font-size: 18px;
+  color: var(--slate);
+}
+
+.leaderboard .team {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard .time {
+  font-family: var(--pixel);
+  font-size: 20px;
+}
+
+.board-empty {
+  font-size: 30px;
+  color: var(--slate);
 }
 
 /* ---------------------------------------------------------------- lobby */
@@ -935,6 +992,14 @@ h3 {
 
 .board-btn:disabled {
   opacity: 0.4;
+}
+
+.timer .penalty {
+  margin-left: 12px;
+  font-size: 18px;
+  color: var(--red);
+  text-shadow: 0 0 10px rgba(255, 92, 92, 0.7);
+  vertical-align: middle;
 }
 
 /* ---------------------------------------------------------------- pairing board */
@@ -1192,47 +1257,6 @@ h3 {
   text-align: center;
 }
 
-/* ---------------------------------------------------------------- reboot */
-
-.reboot-screen {
-  position: absolute;
-  inset: 0;
-  z-index: 8;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 28px;
-  padding: 0 420px;
-  color: var(--red);
-  background: radial-gradient(ellipse at center, rgba(45, 0, 0, 0.92), rgba(1, 3, 8, 0.98));
-  text-align: center;
-}
-
-.reboot-title {
-  font-family: var(--pixel);
-  font-size: 54px;
-  text-shadow: 0 0 24px rgba(255, 92, 92, 0.8);
-  animation: flicker 1.2s infinite;
-}
-
-.reboot-seconds {
-  font-family: var(--pixel);
-  font-size: 34px;
-}
-
-.reboot-screen .wait-track {
-  width: 720px;
-  height: 22px;
-}
-
-.reboot-screen p {
-  margin: 0;
-  color: var(--slate);
-  font-family: var(--pixel);
-  font-size: 16px;
-}
-
 /* ---------------------------------------------------------------- second-screen pages */
 
 html.page-view,
@@ -1243,7 +1267,8 @@ html.page-view #root {
   min-height: 100%;
 }
 
-.navigator {
+.navigator,
+.leaderboard-view {
   max-width: 900px;
   margin: 0 auto;
   padding: 32px 20px 60px;
@@ -1252,7 +1277,8 @@ html.page-view #root {
   color: #e6edf7;
 }
 
-.navigator h1 {
+.navigator h1,
+.leaderboard-view h1 {
   font-family: var(--pixel);
   font-size: clamp(20px, 5vw, 44px);
   color: var(--cyan);
@@ -1285,6 +1311,10 @@ html.page-view #root {
   margin-top: 40px;
   font-size: 32px;
   color: var(--amber);
+}
+
+.leaderboard-view .leaderboard li {
+  font-size: 40px;
 }
 
 /* ---------------------------------------------------------------- legend */
@@ -1347,6 +1377,112 @@ html.page-view #root {
   color: var(--cyan);
   border: 2px solid var(--cyan);
   cursor: pointer;
+}
+
+/* Redesign: more rows, so a slightly smaller type size keeps the dialog inside the stage. */
+.legend.compact {
+  font-size: 30px;
+  line-height: 1.1;
+}
+
+.legend.compact dl {
+  grid-template-columns: 330px 1fr;
+  gap: 12px 24px;
+}
+
+/* ---------------------------------------------------------------- redesign additions */
+
+/* Groups the stage content so it can go inert under the legend without changing the grid layout. */
+.stage-layer {
+  display: contents;
+}
+
+/* Redesign: no mission timer, so the sector name takes the freed space. */
+.topbar.no-timer {
+  grid-template-columns: 1.8fr 0.8fr 1fr;
+}
+
+.footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font-family: var(--term);
+  font-size: 26px;
+  cursor: pointer;
+}
+
+.footer-btn:hover {
+  color: var(--cyan);
+}
+
+.matrix.markable canvas {
+  cursor: crosshair;
+}
+
+.term-help {
+  font-family: var(--term);
+  font-size: 20px;
+  color: var(--green-mid);
+  text-shadow: none;
+}
+
+.how-to .clue-heading {
+  color: var(--cyan);
+  text-shadow: 0 0 5px rgba(53, 240, 255, 0.4);
+}
+
+.hint.locked {
+  color: var(--slate);
+  text-shadow: none;
+}
+
+.hint-tag.locked {
+  background: var(--slate);
+}
+
+.desktop-only {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--ink);
+}
+
+.desktop-only-box {
+  max-width: 36rem;
+  padding: 28px;
+  border: 2px solid var(--amber);
+  background: #030a10;
+  font-size: 24px;
+  line-height: 1.3;
+  color: #e6edf7;
+}
+
+.desktop-only-box h1 {
+  margin-bottom: 16px;
+  font-family: var(--pixel);
+  font-size: 20px;
+  color: var(--amber);
+}
+
+.desktop-only-box p {
+  margin: 0 0 12px;
+}
+
+.desktop-only-nav {
+  color: var(--slate);
+}
+
+.desktop-only-nav b {
+  color: var(--cyan);
+  overflow-wrap: anywhere;
 }
 
 /* ---------------------------------------------------------------- keyframes */

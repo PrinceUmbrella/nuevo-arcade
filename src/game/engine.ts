@@ -16,7 +16,8 @@ import {
   coordKey,
 } from './grid';
 import { buildLetterGrid } from './letters';
-import type { Coord, MissReason, Round, ScanResult } from './types';
+import { REDESIGN } from './ruleset';
+import type { Coord, MissReason, Round, ScanResult, ShotRejection } from './types';
 
 export interface EngineHandlers {
   onInput: () => void;
@@ -24,12 +25,31 @@ export interface EngineHandlers {
   onFireBlocked: () => void;
   onCorrectHit: (x: number, y: number) => void;
   onWrongHit: (x: number, y: number, reason: MissReason) => void;
+  /** Redesign rules: a shot was refused or deflected without touching a cell. */
+  onShotRejected: (rejection: ShotRejection) => void;
+  /** Redesign rules: a grid cell was clicked (used for pencil marks). */
+  onCellClick: (x: number, y: number) => void;
   onFlakHit: () => void;
   onLinesDrawn: () => void;
   onGuideDrawn: () => void;
   onFinaleHit: () => void;
   /** 'off-column': hit the ship away from the target column. 'passed': it crossed unhit. */
   onFinaleMiss: (kind: 'off-column' | 'passed') => void;
+}
+
+interface Bullet {
+  x: number;
+  y: number;
+  row: number;
+  /**
+   * Redesign rules: the bullet's grid-local x, so it rides the sway and lands in the column it
+   * was fired at. Null for classic shots, which resolve against wherever the grid is on arrival.
+   */
+  gridX: number | null;
+  /** Redesign rules: column and row were on the armed cell when SPACE was pressed. */
+  locked: boolean;
+  aim: Coord | null;
+  target: Coord | null;
 }
 
 type CellState = 'alive' | 'dead' | 'star';
@@ -76,6 +96,10 @@ const FLAK_SPEED = 210;
 const CANNON_SPEED = 520;
 const RESPAWN_S = 3;
 const LOCKOUT_S = 2;
+/** Redesign rules: cooldown after a shot fired without LOCK is deflected. */
+export const DEFLECT_COOLDOWN_S = 1.5;
+/** Pointer travel (CSS px) under which a press on the grid counts as a click, not a drag. */
+const CLICK_SLOP_PX = 6;
 const LINE_DRAW_S = 1.4;
 const SHIP_Y = 30;
 const SHIP_SPEED = 170;
@@ -83,6 +107,7 @@ const SHIP_RESPAWN_S = 5;
 const STAR_COLOR = '#e8fbff';
 const LINE_COLOR = '#35f0ff';
 const GUIDE_COLOR = '#ffd166';
+const MARK_COLOR = '#9fe8ff';
 const SHIP_COLOR = '#ff5cf0';
 const FONT = '"Press Start 2P", monospace';
 
@@ -129,10 +154,14 @@ export class GameEngine {
 
   /** Horizontal sway of the whole grid, in logical pixels. */
   private drift = 0;
+  /** Fraction of DRIFT_AMPLITUDE used this round, and when this round's sway began. */
+  private swayAmount = 1;
+  private swayStart = 0;
+  private roundFlak = true;
   private keys = new Set<string>();
   private cannonX = cellCenterX(1);
   private rangeRow = 1;
-  private bullet: { x: number; y: number; row: number } | null = null;
+  private bullet: Bullet | null = null;
   private flak: { x: number; y: number }[] = [];
   private nextFlakAt = 3;
   private particles: Particle[] = [];
@@ -140,12 +169,13 @@ export class GameEngine {
   private inputEnabled = true;
   private flakEnabled = false;
   private lockoutUntil = 0;
-  private cooldownStartedAt = 0;
-  private cooldownEndsAt = 0;
+  private lockoutLabel = 'WEAPONS OFFLINE';
   private shakeUntil = 0;
   private vignetteUntil = 0;
   private armed: Coord | null = null;
   private armedScan: ScanResult = null;
+  private marks: string[] = [];
+  private pendingClick: { x: number; y: number; px: number; py: number } | null = null;
   private showTargets = false;
   private banner: string | null = null;
   private linesStart: number | null = null;
@@ -226,11 +256,14 @@ export class GameEngine {
     this.armedScan = null;
     this.rangeRow = 1;
     this.lockoutUntil = 0;
-    this.cooldownStartedAt = 0;
-    this.cooldownEndsAt = 0;
+    this.pendingClick = null;
     this.guide = null;
     this.finaleActive = false;
     this.ship = { x: -100, active: false, nextAt: 0 };
+    // Classic rules keep the original always-on, full-size sway on the global clock.
+    this.swayAmount = REDESIGN ? clamp(round.sway ?? 1, 0, 1) : 1;
+    this.swayStart = REDESIGN ? this.time : 0;
+    this.roundFlak = !REDESIGN || round.flak !== false;
   }
 
   setInputEnabled(enabled: boolean) {
@@ -238,6 +271,7 @@ export class GameEngine {
     if (!enabled) {
       this.keys.clear();
       this.flak = [];
+      this.pendingClick = null;
       if (this.guide?.dragging) this.guide = null;
     }
   }
@@ -246,7 +280,13 @@ export class GameEngine {
   setArmed(coord: Coord | null, scan: ScanResult = null) {
     this.armed = coord;
     this.armedScan = scan;
-    if (coord) this.rangeRow = coord[1];
+    // Under the redesign the team sets the row by hand, so arming only highlights the cell.
+    if (coord && !REDESIGN) this.rangeRow = coord[1];
+  }
+
+  /** Pencil-marked cells ("x,y"), in placement order. */
+  setMarks(keys: string[]) {
+    this.marks = keys;
   }
 
   /** Cells whose letters have been revealed by SCAN. */
@@ -266,11 +306,6 @@ export class GameEngine {
 
   setBanner(text: string | null) {
     this.banner = text;
-  }
-
-  setWeaponCooldown(wait: { startedAt: number; endsAt: number } | null) {
-    this.cooldownStartedAt = wait?.startedAt ?? 0;
-    this.cooldownEndsAt = wait?.endsAt ?? 0;
   }
 
   drawLines() {
@@ -337,15 +372,28 @@ export class GameEngine {
     return !!this.round?.guideLine && this.hitCount > 0 && this.inputEnabled && !this.finaleActive;
   }
 
+  /** Grid-local logical coordinates -> [column, row], or null outside the grid. */
+  private cellFromGridLocal(gx: number, gy: number): Coord | null {
+    const col = Math.floor((gx - GRID_LEFT) / CELL) + 1;
+    const row = Math.floor((GRID_BOTTOM - gy) / CELL) + 1;
+    return col >= 1 && col <= GRID_SIZE && row >= 1 && row <= GRID_SIZE ? [col, row] : null;
+  }
+
   private onPointerDown = (e: PointerEvent) => {
-    if (!this.guideAvailable) return;
     const [gx, gy] = this.toGridLocal(e);
-    const star = this.cells.find(
-      (c) => c.state === 'star' && Math.hypot(cellCenterX(c.x) - gx, cellCenterY(c.y) - gy) < CELL * 0.5,
-    );
-    if (!star) return;
-    e.preventDefault();
-    this.guide = { from: [cellCenterX(star.x), cellCenterY(star.y)], to: [gx, gy], dragging: true };
+    if (this.guideAvailable) {
+      const star = this.cells.find(
+        (c) => c.state === 'star' && Math.hypot(cellCenterX(c.x) - gx, cellCenterY(c.y) - gy) < CELL * 0.5,
+      );
+      if (star) {
+        e.preventDefault();
+        this.guide = { from: [cellCenterX(star.x), cellCenterY(star.y)], to: [gx, gy], dragging: true };
+        return;
+      }
+    }
+    if (!REDESIGN || !this.inputEnabled || this.finaleActive) return;
+    const cell = this.cellFromGridLocal(gx, gy);
+    if (cell) this.pendingClick = { x: cell[0], y: cell[1], px: e.clientX, py: e.clientY };
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -353,7 +401,12 @@ export class GameEngine {
     this.guide.to = this.toGridLocal(e);
   };
 
-  private onPointerUp = () => {
+  private onPointerUp = (e: PointerEvent) => {
+    const click = this.pendingClick;
+    this.pendingClick = null;
+    if (click && Math.hypot(e.clientX - click.px, e.clientY - click.py) < CLICK_SLOP_PX) {
+      this.handlers.onCellClick(click.x, click.y);
+    }
     if (!this.guide?.dragging) return;
     const [fx, fy] = this.guide.from;
     const [tx, ty] = this.guide.to;
@@ -371,13 +424,43 @@ export class GameEngine {
     return col >= 1 && col <= GRID_SIZE ? col : null;
   }
 
+  /** Cell currently under the cannon at its range row, or null when the cannon is off the grid. */
+  private aimCell(): Coord | null {
+    const col = this.columnAt(this.cannonX);
+    return col === null ? null : [col, this.rangeRow];
+  }
+
+  private isLocked() {
+    const aim = this.aimCell();
+    return !!this.armed && !!aim && aim[0] === this.armed[0] && aim[1] === this.armed[1];
+  }
+
   private fire() {
-    if (this.time < this.lockoutUntil || Date.now() < this.cooldownEndsAt) {
+    if (this.time < this.lockoutUntil) {
       this.handlers.onFireBlocked();
       return;
     }
     if (this.bullet) return;
-    this.bullet = { x: this.cannonX, y: CANNON_Y - 30, row: this.rangeRow };
+    const y = CANNON_Y - 30;
+    if (REDESIGN && !this.finaleActive) {
+      if (!this.armed) {
+        this.handlers.onFireBlocked();
+        this.handlers.onShotRejected({ kind: 'no-target' });
+        return;
+      }
+      // Lock is judged now, when SPACE is pressed; the bullet then rides the sway to that cell.
+      this.bullet = {
+        x: this.cannonX,
+        y,
+        row: this.rangeRow,
+        gridX: this.cannonX - this.drift,
+        locked: this.isLocked(),
+        aim: this.aimCell(),
+        target: this.armed,
+      };
+    } else {
+      this.bullet = { x: this.cannonX, y, row: this.rangeRow, gridX: null, locked: false, aim: null, target: null };
+    }
     this.handlers.onFire();
   }
 
@@ -417,7 +500,7 @@ export class GameEngine {
 
   private update(dt: number) {
     const t = this.time;
-    this.drift = DRIFT_AMPLITUDE * Math.sin((2 * Math.PI * t) / DRIFT_PERIOD_S);
+    this.drift = DRIFT_AMPLITUDE * this.swayAmount * Math.sin((2 * Math.PI * (t - this.swayStart)) / DRIFT_PERIOD_S);
 
     if (this.inputEnabled) {
       const left = this.keys.has('ArrowLeft') || this.keys.has('a');
@@ -436,19 +519,31 @@ export class GameEngine {
     if (this.bullet) {
       const b = this.bullet;
       b.y -= BULLET_SPEED * dt;
+      if (b.gridX !== null) b.x = b.gridX + this.drift;
       if (this.finaleActive) {
         this.updateFinaleBullet(b);
       } else if (b.y <= cellCenterY(b.row)) {
         this.bullet = null;
-        const col = this.columnAt(b.x);
-        if (col === null) this.burst(b.x, b.y, 6, '#8899aa', 120);
-        else this.resolveHit(col, b.row);
+        if (b.gridX !== null) {
+          this.resolveLockedShot(b);
+        } else {
+          const col = this.columnAt(b.x);
+          if (col === null) this.burst(b.x, b.y, 6, '#8899aa', 120);
+          else this.resolveHit(col, b.row);
+        }
       }
     }
 
     if (this.finaleActive) this.updateShip(dt);
 
-    if (this.inputEnabled && this.flakEnabled && !this.finaleActive && t >= this.nextFlakAt && this.flak.length < 3) {
+    if (
+      this.inputEnabled &&
+      this.flakEnabled &&
+      this.roundFlak &&
+      !this.finaleActive &&
+      t >= this.nextFlakAt &&
+      this.flak.length < 3
+    ) {
       const alive = this.cells.filter((c) => this.isAlive(c));
       if (alive.length) {
         const c = alive[Math.floor(Math.random() * alive.length)];
@@ -525,6 +620,29 @@ export class GameEngine {
     if (b.y < -20) this.bullet = null;
   }
 
+  /**
+   * Redesign rules: a shot fired on LOCK always reaches the armed cell. Anything else is
+   * deflected before it touches a cell, so aim errors reveal nothing and cost no shield.
+   */
+  private resolveLockedShot(b: Bullet) {
+    if (!b.locked || !b.target) {
+      this.burst(b.x, b.y, 18, '#ffb347', 200);
+      this.burst(b.x, b.y, 8, '#ffffff', 120);
+      this.lockoutUntil = this.time + DEFLECT_COOLDOWN_S;
+      this.lockoutLabel = 'DEFLECTED';
+      if (b.target) this.handlers.onShotRejected({ kind: 'deflected', aim: b.aim, target: b.target });
+      return;
+    }
+    const [x, y] = b.target;
+    const cell = this.cellAt(x, y);
+    if (cell.state === 'dead') {
+      this.burst(cellCenterX(x) + this.drift, cellCenterY(y), 6, '#8899aa', 120);
+      this.handlers.onShotRejected({ kind: 'respawning', target: b.target });
+      return;
+    }
+    this.resolveHit(x, y);
+  }
+
   private resolveHit(x: number, y: number) {
     const cell = this.cellAt(x, y);
     const cx = cellCenterX(x) + this.drift;
@@ -554,6 +672,7 @@ export class GameEngine {
 
   private onCannonHit() {
     this.lockoutUntil = this.time + LOCKOUT_S;
+    this.lockoutLabel = 'WEAPONS OFFLINE';
     this.shakeUntil = this.time + 0.5;
     this.vignetteUntil = this.time + 0.9;
     this.burst(this.cannonX, CANNON_Y, 24, '#ff5522', 240);
@@ -602,6 +721,7 @@ export class GameEngine {
     this.renderLines();
     this.drawGuide();
     this.drawCells();
+    this.drawMarks();
     if (this.showTargets) this.drawStaffOverlay();
     this.drawRangeGridPart();
     ctx.restore();
@@ -960,6 +1080,32 @@ export class GameEngine {
     ctx.restore();
   }
 
+  /** Pencil marks: a faint numbered ring per marked cell, hidden once the cell is a star. */
+  private drawMarks() {
+    if (!this.marks.length) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.strokeStyle = MARK_COLOR;
+    ctx.fillStyle = MARK_COLOR;
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.font = `12px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'alphabetic';
+    this.marks.forEach((key, i) => {
+      const [x, y] = key.split(',').map(Number);
+      if (this.cellAt(x, y)?.state === 'star') return;
+      const cx = cellCenterX(x);
+      const cy = cellCenterY(y);
+      ctx.beginPath();
+      ctx.arc(cx, cy, CELL * 0.42, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillText(String(i + 1), cx + CELL / 2 - 6, cy + CELL / 2 - 6);
+    });
+    ctx.restore();
+  }
+
   private drawStaffOverlay() {
     if (!this.round) return;
     const { ctx } = this;
@@ -1024,9 +1170,7 @@ export class GameEngine {
     const { ctx } = this;
     const x = this.cannonX;
     const y = CANNON_Y;
-    const now = Date.now();
-    const recalibrating = now < this.cooldownEndsAt;
-    const locked = recalibrating || this.time < this.lockoutUntil;
+    const locked = this.time < this.lockoutUntil;
     const flicker = locked && Math.floor(this.time * 12) % 2 === 0;
     const color = locked ? (flicker ? '#ff4040' : '#666c78') : '#5dff9d';
     ctx.save();
@@ -1039,35 +1183,51 @@ export class GameEngine {
     ctx.fillRect(x - 3, y - 30, 6, 8);
     ctx.restore();
     if (locked) {
-      const remainingSeconds = recalibrating
-        ? (this.cooldownEndsAt - now) / 1000
-        : this.lockoutUntil - this.time;
-      const label = recalibrating ? 'RECALIBRATING...' : 'WEAPONS OFFLINE';
       ctx.fillStyle = '#ff5c5c';
       ctx.font = `16px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const labelX = clamp(x, 190, W - 190);
-      ctx.fillText(`${label} ${remainingSeconds.toFixed(1)}s`, labelX, y + 34);
-      if (recalibrating) {
-        const duration = this.cooldownEndsAt - this.cooldownStartedAt;
-        const progress = duration > 0 ? clamp((now - this.cooldownStartedAt) / duration, 0, 1) : 1;
-        ctx.strokeStyle = '#ff5c5c';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(labelX - 150, y + 48, 300, 10);
-        ctx.fillRect(labelX - 148, y + 50, 296 * progress, 6);
-      }
+      ctx.fillText(`${this.lockoutLabel} ${(this.lockoutUntil - this.time).toFixed(1)}s`, clamp(x, 170, W - 170), y + 36);
     }
   }
 
   private drawLegend() {
     const { ctx } = this;
-    const guideTip = this.guideAvailable && !this.guide;
-    ctx.font = `18px ${FONT}`;
+    const { text, color } = this.coachLine();
+    // The redesign's instructions run longer, so they use a smaller size centered on the grid, clear of the Y axis label.
+    ctx.font = `${REDESIGN ? 16 : 18}px ${FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = guideTip ? GUIDE_COLOR : '#ffd166';
-    ctx.fillText(guideTip ? 'DRAG FROM A STAR TO LAY A GUIDE LINE' : 'Y = 1 IS THE BOTTOM ROW', W / 2, 24);
+    ctx.fillStyle = color;
+    // Redesign: the line rides the sway with the grid so it never collides with the Y axis label.
+    ctx.fillText(text, REDESIGN ? (GRID_LEFT + GRID_RIGHT) / 2 + this.drift : W / 2, 24);
+  }
+
+  /** The line above the grid. Under the redesign it always names the next thing to do. */
+  private coachLine(): { text: string; color: string } {
+    const guideTip = this.guideAvailable && !this.guide;
+    const yHint = { text: 'Y = 1 IS THE BOTTOM ROW', color: '#ffd166' };
+    const guide = { text: 'DRAG FROM A STAR TO LAY A GUIDE LINE', color: GUIDE_COLOR };
+    if (!REDESIGN) return guideTip ? guide : yHint;
+    if (!this.inputEnabled || this.banner) return yHint;
+    if (this.time < this.lockoutUntil) {
+      const text = this.lockoutLabel === 'DEFLECTED' ? 'SHOT DEFLECTED. LINE UP LOCK, THEN FIRE' : 'WEAPONS OFFLINE. HOLD FIRE';
+      return { text, color: '#ff5c5c' };
+    }
+    if (!this.armed) {
+      return guideTip ? guide : { text: 'TYPE X,Y IN ARM TARGET. Y = 1 IS THE BOTTOM ROW', color: '#ffd166' };
+    }
+    const [ax, ay] = this.armed;
+    if (this.isLocked()) return { text: `LOCKED ON (${ax},${ay}). PRESS SPACE`, color: '#35f0ff' };
+    const steps: string[] = [];
+    if (this.columnAt(this.cannonX) !== ax) {
+      const side = cellCenterX(ax) + this.drift < this.cannonX ? 'LEFT' : 'RIGHT';
+      steps.push(`MOVE ${side} TO COLUMN ${ax}`);
+    }
+    if (this.rangeRow !== ay) {
+      steps.push(`${steps.length ? 'ROW' : 'SET ROW'} ${ay > this.rangeRow ? 'UP' : 'DOWN'} TO ${ay}`);
+    }
+    return { text: steps.join(' · '), color: '#ffb347' };
   }
 
   private drawBanner(text: string) {

@@ -5,10 +5,12 @@ interface Props {
   /** Must be referentially stable — the engine is created once per handlers/onReady pair. */
   handlers: EngineHandlers;
   onReady: (engine: GameEngine | null) => void;
+  /** Cells can be clicked to pencil-mark them (redesign rules). Shows a crosshair cursor. */
+  markable?: boolean;
 }
 
 /** Hosts the 2D canvas game engine (aliens, cannon, stars, lines). */
-export function TargetingMatrix({ handlers, onReady }: Props) {
+export function TargetingMatrix({ handlers, onReady, markable = false }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function TargetingMatrix({ handlers, onReady }: Props) {
   }, [handlers, onReady]);
 
   return (
-    <div className="matrix" onMouseDown={() => (document.activeElement as HTMLElement | null)?.blur()}>
+    <div className={markable ? 'matrix markable' : 'matrix'} onMouseDown={() => (document.activeElement as HTMLElement | null)?.blur()}>
       <canvas ref={canvasRef} aria-label="Targeting matrix, 8 by 8 grid of aliens" />
     </div>
   );

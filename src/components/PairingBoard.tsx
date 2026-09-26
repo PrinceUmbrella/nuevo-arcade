@@ -1,6 +1,8 @@
-import { useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
+import { REDESIGN } from '../game/ruleset';
 import type { BoardState } from '../game/state';
 import type { PairingBoard as BoardConfig } from '../game/types';
+import { useDialogFocus } from '../hooks/useDialogFocus';
 
 type Kind = 'col' | 'row';
 
@@ -20,6 +22,8 @@ const DRAG_TYPE = 'application/x-constellation-card';
 /** Sector 2: drag clue cards into W positions; the mini-map plots the numbers the team wrote. */
 export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props) {
   const [selected, setSelected] = useState<{ kind: Kind; card: number } | null>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useDialogFocus(closeRef, REDESIGN);
 
   const slotOf = (kind: Kind, card: number) => (kind === 'col' ? state.colSlots : state.rowSlots).indexOf(card);
   const valueOf = (kind: Kind, card: number | null) =>
@@ -46,13 +50,12 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
     return x >= 1 && x <= 8 && y >= 1 && y <= 8 ? { i, x, y } : null;
   });
   const toMap = (x: number, y: number) => [(x - 0.5) * MAP_CELL, MAP_SIZE - (y - 0.5) * MAP_CELL] as const;
-  const allPairsFilled = points.every((p) => p !== null);
-  const segments = allPairsFilled ? points.flatMap((p, i) => {
+  const segments = points.flatMap((p, i) => {
     const q = points[i + 1];
     return p && q ? [[toMap(p.x, p.y), toMap(q.x, q.y)] as const] : [];
-  }) : [];
+  });
 
-  const unusedCols = state.colOrder.filter((card) => slotOf('col', card) === -1);
+  const unusedCols = config.columnCards.map((_, c) => c).filter((c) => slotOf('col', c) === -1);
   const allColsPlaced = state.colSlots.every((c) => c !== null);
 
   const renderCard = (kind: Kind, text: string, card: number) => {
@@ -123,7 +126,7 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
             Write each card&apos;s number, then drag cards into W positions (or click a card, then a slot). Click a
             filled slot to take its card back.
           </p>
-          <button type="button" className="pairing-close" onClick={onClose}>
+          <button type="button" className="pairing-close" ref={closeRef} onClick={onClose}>
             BACK TO GRID (ESC)
           </button>
         </header>
@@ -131,11 +134,11 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
         <div className="pairing-body">
           <section className="card-pool" aria-label="Column stream">
             <h3>COLUMN STREAM</h3>
-            <ul>{state.colOrder.map((card) => renderCard('col', config.columnCards[card], card))}</ul>
+            <ul>{config.columnCards.map((t, i) => renderCard('col', t, i))}</ul>
           </section>
           <section className="card-pool" aria-label="Row stream">
             <h3>ROW STREAM</h3>
-            <ul>{state.rowOrder.map((card) => renderCard('row', config.rowCards[card], card))}</ul>
+            <ul>{config.rowCards.map((t, i) => renderCard('row', t, i))}</ul>
           </section>
 
           <section className="pairing-side">

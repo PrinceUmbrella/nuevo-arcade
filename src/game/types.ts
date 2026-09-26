@@ -59,7 +59,13 @@ export interface Round {
   /** Clue sections are shown only on the ?view=navigator device (staff can override). */
   navigatorOnly?: boolean;
   finale?: Finale;
+  /** Grid sway as a fraction of DRIFT_AMPLITUDE (0 = still). Defaults to 1. Ignored with ?rules=classic. */
+  sway?: number;
+  /** Whether aliens drop flak on the cannon. Defaults to true. Ignored with ?rules=classic. */
+  flak?: boolean;
   hints: string[];
+  /** Original hint text, used only with ?rules=classic. Falls back to `hints`. */
+  classicHints?: string[];
   /** Only used when `hiddenName` is true. Matching is case/punctuation-insensitive. */
   acceptedNames: string[];
   /** One letter per target, in `targets` order. The stars spell it; the vault awards it. */
@@ -86,3 +92,9 @@ export interface HintEntry {
 export type ScanResult = 'in' | 'out' | null;
 
 export type MissReason = 'miss' | 'order';
+
+/** Why a shot never reached a cell (redesign rules only). */
+export type ShotRejection =
+  | { kind: 'no-target' }
+  | { kind: 'deflected'; aim: Coord | null; target: Coord }
+  | { kind: 'respawning'; target: Coord };

@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ROUNDS } from './data/constellations';
 import { sound } from './game/audio';
 import type { EngineHandlers, GameEngine } from './game/engine';
-import { publishSector } from './game/sectorSync';
+import {
+  addLeaderboardEntry,
+  clearLeaderboard,
+  loadLeaderboard,
+  publishSector,
+  subscribeLeaderboard,
+  type LeaderboardEntry,
+} from './game/leaderboard';
 import {
   createInitialState,
   currentRound,
@@ -12,13 +19,16 @@ import {
   masterKey,
   MAX_SCANS,
   MAX_WRONG_HITS,
+  nextHintLocked,
   sectorLabel,
 } from './game/state';
-import type { TimedWait } from './game/state';
+import { REDESIGN } from './game/ruleset';
 import type { Coord, Phase } from './game/types';
-import { formatDuration, useNow } from './hooks/useNow';
+import { useNow } from './hooks/useNow';
 import { useStageScale } from './hooks/useStageScale';
+import { useViewportTooSmall } from './hooks/useViewportTooSmall';
 import { AstrometryLog } from './components/AstrometryLog';
+import { DesktopOnlyNotice } from './components/DesktopOnlyNotice';
 import { Key } from './components/Key';
 import { ConstellationDetected } from './components/ConstellationDetected';
 import { ControlsLegend } from './components/ControlsLegend';
@@ -30,9 +40,11 @@ import { VictoryScreen } from './components/VictoryScreen';
 import { SpaceBackground } from './components/three/SpaceBackground';
 
 const VAULT_HOLD_MS = 1600;
+const FAILED_HOLD_MS = 3000;
 
 const BANNERS: Partial<Record<Phase, string>> = {
   identify: 'NAME THIS CONSTELLATION IN THE LOG',
+  failed: 'SHIELDS DOWN. SECTOR RESTARTING',
 };
 
 const isTypingTarget = (t: EventTarget | null) =>
@@ -45,6 +57,9 @@ export default function App() {
   const [showLegend, setShowLegend] = useState(false);
   const [showNavClues, setShowNavClues] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [entries, setEntries] = useState<LeaderboardEntry[]>(loadLeaderboard);
+  const [result, setResult] = useState<{ rank: number; entry: LeaderboardEntry } | null>(null);
+  const recordedRun = useRef<number | null>(null);
   const stageScale = useStageScale();
   const round = currentRound(state);
   const { phase, epoch, roundIndex, armed } = state;
@@ -61,8 +76,13 @@ export default function App() {
       },
       onWrongHit: (x, y, reason) => {
         sound.buzz();
-        dispatch({ type: 'WRONG_HIT', x, y, reason, now: Date.now() });
+        dispatch({ type: 'WRONG_HIT', x, y, reason });
       },
+      onShotRejected: (rejection) => {
+        if (rejection.kind !== 'no-target') sound.denied();
+        dispatch({ type: 'SHOT_REJECTED', rejection });
+      },
+      onCellClick: (x, y) => dispatch({ type: 'TOGGLE_MARK', x, y }),
       onFlakHit: () => {
         sound.impact();
         dispatch({ type: 'FLAK_HIT' });
@@ -114,6 +134,10 @@ export default function App() {
   }, [engine, state.scanned, epoch]);
 
   useEffect(() => {
+    engine?.setMarks(state.marks);
+  }, [engine, state.marks, epoch]);
+
+  useEffect(() => {
     engine?.setShowTargets(showTargets);
   }, [engine, showTargets]);
 
@@ -122,12 +146,10 @@ export default function App() {
   }, [engine, started]);
 
   useEffect(() => {
-    engine?.setWeaponCooldown(state.cooldown);
-  }, [engine, state.cooldown]);
-
-  useEffect(() => {
     publishSector(phase === 'lobby' ? -1 : roundIndex);
   }, [phase, roundIndex]);
+
+  useEffect(() => subscribeLeaderboard(() => setEntries(loadLeaderboard())), []);
 
   // The pairing board only exists while its sector is being played.
   const boardVisible = boardOpen && !!round.board && phase === 'playing';
@@ -137,10 +159,24 @@ export default function App() {
     if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__game = { engine, dispatch };
   }, [engine]);
 
-  // The mission clock is hidden during play, but still recorded for the victory screen and staff overlay.
-  const running = started && state.endedAt === null;
-  const now = useNow(running || !!state.pendingHint || !!state.cooldown || !!state.reboot);
-  const elapsedMs = state.startedAt !== null ? (state.endedAt ?? now) - state.startedAt : 0;
+  // ---- timer (classic only; requested-hint penalties are added on top of real time)
+  const running = !REDESIGN && started && state.endedAt === null;
+  const now = useNow(running);
+  const elapsedMs = state.startedAt !== null ? (state.endedAt ?? now) - state.startedAt + state.penaltyMs : 0;
+
+  // ---- record the finished run once (classic only: the redesign has no leaderboard)
+  useEffect(() => {
+    if (REDESIGN || phase !== 'victory' || state.startedAt === null || recordedRun.current === state.startedAt) return;
+    recordedRun.current = state.startedAt;
+    const entry: LeaderboardEntry = {
+      team: state.team,
+      ms: (state.endedAt ?? Date.now()) - state.startedAt + state.penaltyMs,
+      penaltyMs: state.penaltyMs,
+      restarts: state.sectorRestarts,
+      at: new Date().toISOString(),
+    };
+    setResult({ rank: addLeaderboardEntry(entry), entry });
+  }, [phase, state.startedAt, state.endedAt, state.penaltyMs, state.team, state.sectorRestarts]);
 
   // ---- phase side effects
   useEffect(() => {
@@ -148,6 +184,8 @@ export default function App() {
     if (phase === 'failed') {
       sound.impact();
       engine?.alarm();
+      const id = window.setTimeout(() => dispatch({ type: 'RESTART_SECTOR' }), FAILED_HOLD_MS);
+      return () => window.clearTimeout(id);
     }
     if (phase === 'vault') {
       sound.clunk();
@@ -155,33 +193,6 @@ export default function App() {
       return () => window.clearTimeout(id);
     }
   }, [phase, epoch, engine]);
-
-  useEffect(() => {
-    if (!state.cooldown) return;
-    const id = window.setTimeout(
-      () => dispatch({ type: 'COMPLETE_COOLDOWN' }),
-      Math.max(0, state.cooldown.endsAt - Date.now()),
-    );
-    return () => window.clearTimeout(id);
-  }, [state.cooldown]);
-
-  useEffect(() => {
-    if (!state.pendingHint) return;
-    const id = window.setTimeout(
-      () => dispatch({ type: 'COMPLETE_HINT' }),
-      Math.max(0, state.pendingHint.endsAt - Date.now()),
-    );
-    return () => window.clearTimeout(id);
-  }, [state.pendingHint]);
-
-  useEffect(() => {
-    if (phase !== 'failed' || !state.reboot) return;
-    const id = window.setTimeout(
-      () => dispatch({ type: 'RESTART_SECTOR' }),
-      Math.max(0, state.reboot.endsAt - Date.now()),
-    );
-    return () => window.clearTimeout(id);
-  }, [phase, state.reboot]);
 
   // ---- audio unlock + staff / legend keys
   useEffect(() => {
@@ -192,12 +203,14 @@ export default function App() {
         setBoardOpen(false);
         return;
       }
-      if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === 'KeyC') {
-        e.preventDefault();
-        dispatch({ type: 'CANCEL_WAITS' });
+      if (isTypingTarget(e.target)) {
+        // Redesign: "?" also opens the controls from an empty text field, where teams spend much of the game.
+        if (REDESIGN && e.key === '?' && e.target instanceof HTMLInputElement && e.target.value === '') {
+          e.preventDefault();
+          setShowLegend(true);
+        }
         return;
       }
-      if (isTypingTarget(e.target)) return;
       if (e.key === '?') {
         setShowLegend((v) => !v);
         return;
@@ -208,6 +221,7 @@ export default function App() {
         setShowTargets(false);
         setShowNavClues(false);
         setBoardOpen(false);
+        setResult(null);
         dispatch({ type: 'RESET' });
       } else if (e.code === 'KeyN') {
         e.preventDefault();
@@ -218,6 +232,10 @@ export default function App() {
       } else if (e.code === 'KeyV') {
         e.preventDefault();
         setShowNavClues((v) => !v);
+      } else if (e.code === 'KeyL' && !REDESIGN) {
+        e.preventDefault();
+        clearLeaderboard();
+        dispatch({ type: 'LOG', text: 'STAFF: LEADERBOARD CLEARED', tone: 'warn' });
       }
     };
     window.addEventListener('pointerdown', unlock, true);
@@ -238,6 +256,8 @@ export default function App() {
   }, []);
 
   const onArm = useCallback((coord: Coord | null) => dispatch({ type: 'ARM', coord }), []);
+  const onMark = useCallback((coord: Coord) => dispatch({ type: 'TOGGLE_MARK', x: coord[0], y: coord[1] }), []);
+  const onClearMarks = useCallback(() => dispatch({ type: 'CLEAR_MARKS' }), []);
 
   const onInvalidCoord = useCallback((text: string) => {
     sound.denied();
@@ -283,118 +303,126 @@ export default function App() {
     : 0;
 
   const label = sectorLabel(state);
+  const tooSmall = useViewportTooSmall();
+  // Redesign: while a dialog is up, the game behind it can't be reached with Tab.
+  const behindDialog = REDESIGN && (phase === 'lobby' || phase === 'victory' || boardVisible);
+  const underLegend = REDESIGN && showLegend;
 
   return (
     <>
       <SpaceBackground tint={round.alienColor} paused={phase === 'reveal'} />
 
-      <div className="viewport">
+      <div className="viewport" inert={REDESIGN && tooSmall}>
         <div className="stage" style={{ transform: `translate(-50%, -50%) scale(${stageScale})` }}>
           <h1 className="visually-hidden">The Constellation Grid</h1>
-          <section className="left" aria-label="Targeting matrix">
-            <TopBar
-              sectorNumber={roundIndex + 1}
-              sectorCount={ROUNDS.length}
-              sectorName={label}
-              hidden={label !== round.name}
-              hitsRemaining={round.targets.length - state.hits.length}
-              misses={state.wrongHits}
-              maxMisses={MAX_WRONG_HITS}
-            />
-            <TargetingMatrix handlers={handlers} onReady={setEngine} />
-            <div className="matrix-footer">
-              <span>
-                <Key arrow="left" />
-                <Key arrow="right" /> MOVE
-              </span>
-              <span>
-                <Key arrow="up" />
-                <Key arrow="down" /> RANGE
-              </span>
-              <span>
-                <Key>SPACE</Key> FIRE
-              </span>
-              <span>
-                <Key>?</Key> CONTROLS
-              </span>
-              {showTargets && <span className="staff-flag">STAFF {formatDuration(elapsedMs)}</span>}
-              {showNavClues && round.navigatorOnly && <span className="staff-flag">NAV CLUES ON SCREEN</span>}
-            </div>
-          </section>
+          <div className="stage-layer" inert={underLegend}>
+            <section className="left" aria-label="Targeting matrix" inert={behindDialog}>
+              <TopBar
+                sectorNumber={roundIndex + 1}
+                sectorCount={ROUNDS.length}
+                sectorName={label}
+                hidden={label !== round.name}
+                elapsedMs={elapsedMs}
+                penaltyMs={state.penaltyMs}
+                started={started}
+                hitsRemaining={round.targets.length - state.hits.length}
+                misses={state.wrongHits}
+                maxMisses={MAX_WRONG_HITS}
+              />
+              <TargetingMatrix handlers={handlers} onReady={setEngine} markable={REDESIGN && phase === 'playing'} />
+              <div className="matrix-footer">
+                <span>
+                  <Key arrow="left" />
+                  <Key arrow="right" /> MOVE
+                </span>
+                <span>
+                  <Key arrow="up" />
+                  <Key arrow="down" /> {REDESIGN ? 'ROW' : 'RANGE'}
+                </span>
+                <span>
+                  <Key>SPACE</Key> FIRE
+                </span>
+                {REDESIGN ? (
+                  <button
+                    type="button"
+                    className="footer-btn"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.currentTarget.blur();
+                      setShowLegend(true);
+                    }}
+                  >
+                    <Key>?</Key> CONTROLS
+                  </button>
+                ) : (
+                  <span>
+                    <Key>?</Key> CONTROLS
+                  </span>
+                )}
+                {!REDESIGN && <span className="staff-flag">CLASSIC RULES</span>}
+                {showTargets && <span className="staff-flag">STAFF OVERLAY</span>}
+                {showNavClues && round.navigatorOnly && <span className="staff-flag">NAV CLUES ON SCREEN</span>}
+              </div>
+            </section>
 
-          <AstrometryLog
-            round={round}
-            roundIndex={roundIndex}
-            phase={phase}
-            hints={state.hints}
-            hits={state.hits}
-            log={state.log}
-            armed={armed}
-            armedScan={state.armedScan}
-            scansLeft={MAX_SCANS - state.scansUsed}
-            fragments={state.fragments}
-            masterKey={masterKey(state)}
-            decrypted={state.decrypted}
-            now={now}
-            pendingHint={state.pendingHint}
-            showNavClues={showNavClues}
-            boardPlaced={boardPlaced}
-            onOpenBoard={() => setBoardOpen(true)}
-            onArm={onArm}
-            onScan={onScan}
-            onInvalidCoord={onInvalidCoord}
-            onRequestHint={onRequestHint}
-            onIdentify={onIdentify}
-            onDecrypt={onDecrypt}
-          />
-
-          {boardVisible && round.board && state.board && (
-            <PairingBoard
-              config={round.board}
-              state={state.board}
-              onPlace={onBoardPlace}
-              onValue={onBoardValue}
-              onClose={() => setBoardOpen(false)}
-            />
-          )}
-          {phase === 'lobby' && <Lobby onStart={onBegin} />}
-          {phase === 'victory' && (
-            <VictoryScreen
-              team={state.team}
+            <AstrometryLog
+              inert={behindDialog}
+              round={round}
+              roundIndex={roundIndex}
+              phase={phase}
+              hints={state.hints}
+              hits={state.hits}
+              log={state.log}
+              armed={armed}
+              armedScan={state.armedScan}
+              scansLeft={MAX_SCANS - state.scansUsed}
+              marks={state.marks.length}
+              hintLocked={nextHintLocked(state)}
+              fragments={state.fragments}
               masterKey={masterKey(state)}
-              totalMs={elapsedMs}
-              sectorRestarts={state.sectorRestarts}
+              decrypted={state.decrypted}
+              showNavClues={showNavClues}
+              boardPlaced={boardPlaced}
+              onOpenBoard={() => setBoardOpen(true)}
+              onArm={onArm}
+              onMark={onMark}
+              onClearMarks={onClearMarks}
+              onScan={onScan}
+              onInvalidCoord={onInvalidCoord}
+              onRequestHint={onRequestHint}
+              onIdentify={onIdentify}
+              onDecrypt={onDecrypt}
             />
-          )}
-          {phase === 'failed' && state.reboot && <RebootScreen wait={state.reboot} now={now} />}
+
+            {boardVisible && round.board && state.board && (
+              <PairingBoard
+                config={round.board}
+                state={state.board}
+                onPlace={onBoardPlace}
+                onValue={onBoardValue}
+                onClose={() => setBoardOpen(false)}
+              />
+            )}
+            {phase === 'lobby' && <Lobby entries={entries} onStart={onBegin} />}
+            {phase === 'victory' && (
+              <VictoryScreen
+                team={state.team}
+                masterKey={masterKey(state)}
+                totalMs={result?.entry.ms ?? elapsedMs}
+                penaltyMs={state.penaltyMs}
+                sectorRestarts={state.sectorRestarts}
+                rank={result?.rank ?? null}
+                entries={entries}
+                mine={result?.entry ?? null}
+              />
+            )}
+          </div>
           {showLegend && <ControlsLegend onClose={() => setShowLegend(false)} />}
         </div>
       </div>
 
       {phase === 'reveal' && <ConstellationDetected key={epoch} round={round} onDone={onRevealDone} />}
+      {REDESIGN && tooSmall && <DesktopOnlyNotice />}
     </>
-  );
-}
-
-function RebootScreen({ wait, now }: { wait: TimedWait; now: number }) {
-  const duration = wait.endsAt - wait.startedAt;
-  const progress = Math.min(1, Math.max(0, (now - wait.startedAt) / duration));
-  const seconds = Math.min(Math.ceil(duration / 1000), Math.max(0, Math.ceil((wait.endsAt - now) / 1000)));
-  return (
-    <div className="reboot-screen" role="alert" aria-live="assertive">
-      <div className="reboot-title">SYSTEMS REBOOTING</div>
-      <div className="reboot-seconds">{seconds}s</div>
-      <div
-        className="wait-track"
-        role="progressbar"
-        aria-label="Systems rebooting"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(progress * 100)}
-      >
-        <span style={{ transform: `scaleX(${progress})` }} />
-      </div>
-      <p>SECTOR DATA, HINTS, AND SCANS RETAINED</p>
-    </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ROUNDS } from '../data/constellations';
-import { readPublishedSector, SECTOR_SYNC_KEY } from '../game/sectorSync';
+import { readPublishedSector, SECTOR_SYNC_KEY } from '../game/leaderboard';
 
 /**
  * ?view=navigator: shows the clues for navigator-only sectors on a phone or tablet.

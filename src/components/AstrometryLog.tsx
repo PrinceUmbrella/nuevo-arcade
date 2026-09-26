@@ -2,11 +2,14 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ROUNDS } from '../data/constellations';
 import { vigenere } from '../game/cipher';
 import { parseCoord } from '../game/grid';
-import { HINT_DECRYPT_MS, type PendingHint } from '../game/state';
+import { REDESIGN } from '../game/ruleset';
+import { MAX_MARKS, roundHints } from '../game/state';
 import type { Coord, HintEntry, LogEntry, Phase, Round, ScanResult } from '../game/types';
 import { useTypewriter } from '../hooks/useTypewriter';
 
 interface Props {
+  /** Unreachable by keyboard while a dialog sits on top (redesign rules). */
+  inert?: boolean;
   round: Round;
   roundIndex: number;
   phase: Phase;
@@ -16,12 +19,16 @@ interface Props {
   armed: Coord | null;
   armedScan: ScanResult;
   scansLeft: number;
+  /** Pencil marks on the grid right now. */
+  marks: number;
+  /** Redesign: the next hint is the final one and waits for a wrong answer in this sector. */
+  hintLocked: boolean;
   fragments: string[];
   masterKey: string;
   decrypted: boolean;
-  now: number;
-  pendingHint: PendingHint | null;
   onArm: (coord: Coord | null) => void;
+  onMark: (coord: Coord) => void;
+  onClearMarks: () => void;
   onScan: () => void;
   onOpenBoard: () => void;
   boardPlaced: number;
@@ -37,22 +44,14 @@ const VISIBLE_MESSAGES = 2;
 export function AstrometryLog(props: Props) {
   const { round, roundIndex, phase, hints, log, fragments, masterKey, decrypted } = props;
   const mission = useTypewriter(round.missionText);
-  const hintsLeft = round.hints.length - hints.length;
-  const canHint = hintsLeft > 0 && !props.pendingHint && (phase === 'playing' || phase === 'identify');
+  const hintsLeft = roundHints(round).length - hints.length;
+  const canHint = hintsLeft > 0 && !props.hintLocked && (phase === 'playing' || phase === 'identify');
   const identified = ['reveal', 'finale', 'vault', 'victory'].includes(phase);
   const sectorTitle = round.hiddenName && !identified ? 'CLASSIFIED' : round.name;
   const hintsRef = useRef<HTMLDivElement>(null);
   const encrypted = !!round.cipher && !decrypted;
   const canScan = phase === 'playing' && !!props.armed && props.armedScan === null && props.scansLeft > 0;
   const scanLabel = props.scansLeft === 0 ? 'NONE LEFT' : props.armed ? `${props.scansLeft} LEFT` : 'ARM FIRST';
-  const nextHintWait = HINT_DECRYPT_MS[Math.min(hints.length, HINT_DECRYPT_MS.length - 1)] / 1000;
-  const decryptDuration = props.pendingHint ? props.pendingHint.endsAt - props.pendingHint.startedAt : 0;
-  const decryptProgress = props.pendingHint
-    ? Math.min(1, Math.max(0, (props.now - props.pendingHint.startedAt) / decryptDuration))
-    : 0;
-  const decryptSeconds = props.pendingHint
-    ? Math.min(Math.ceil(decryptDuration / 1000), Math.max(0, Math.ceil((props.pendingHint.endsAt - props.now) / 1000)))
-    : 0;
   // Letters found so far, in target order, e.g. "S _ A _ _".
   const progress = round.targets
     .map(([x, y], i) => (props.hits.includes(`${x},${y}`) ? round.keyFragment[i] : '_'))
@@ -72,7 +71,7 @@ export function AstrometryLog(props: Props) {
   }, [hints.length]);
 
   return (
-    <aside className="log-panel" aria-label="Captain's astrometry log">
+    <aside className="log-panel" aria-label="Captain's astrometry log" inert={props.inert}>
       <header className="log-header">
         <h2>CAPTAIN&apos;S ASTROMETRY LOG</h2>
         <span className={`log-sector ${round.hiddenName && !identified ? 'classified' : ''}`}>
@@ -121,6 +120,7 @@ export function AstrometryLog(props: Props) {
             );
           })
         )}
+        {REDESIGN && roundIndex === 0 && <HowThisWorks letters={round.keyFragment.length} />}
         {round.board && (
           <div className="board-launch">
             <p>The column and row streams are on the pairing board.</p>
@@ -148,6 +148,12 @@ export function AstrometryLog(props: Props) {
               <span className={h.auto ? 'hint-tag auto' : 'hint-tag'}>{h.auto ? 'AUTO HINT' : 'HINT'}</span> {h.text}
             </div>
           ))}
+          {props.hintLocked && phase === 'playing' && (
+            <div className="hint locked">
+              <span className="hint-tag locked">LOCKED</span> The last hint gives a star away. It unlocks after your
+              first wrong answer in this sector.
+            </div>
+          )}
         </div>
       )}
 
@@ -160,30 +166,19 @@ export function AstrometryLog(props: Props) {
         ))}
       </div>
 
-      {props.pendingHint && (
-        <div className="decrypt-wait" aria-live="polite">
-          <div className="decrypt-wait-label">
-            <span>DECRYPTING TRANSMISSION...</span>
-            <span>{decryptSeconds}s</span>
-          </div>
-          <div
-            className="wait-track"
-            role="progressbar"
-            aria-label="Decrypting requested hint"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(decryptProgress * 100)}
-          >
-            <span style={{ transform: `scaleX(${decryptProgress})` }} />
-          </div>
-        </div>
-      )}
-
       <div className="controls">
         {phase === 'identify' ? (
           <IdentifyInput onIdentify={props.onIdentify} />
         ) : (
-          <ArmTargetInput armed={props.armed} disabled={phase !== 'playing'} onArm={props.onArm} onInvalid={props.onInvalidCoord} />
+          <ArmTargetInput
+            armed={props.armed}
+            disabled={phase !== 'playing'}
+            marks={props.marks}
+            onArm={props.onArm}
+            onMark={props.onMark}
+            onClearMarks={props.onClearMarks}
+            onInvalid={props.onInvalidCoord}
+          />
         )}
         {phase !== 'identify' && (
           <button
@@ -205,6 +200,7 @@ export function AstrometryLog(props: Props) {
           type="button"
           className="hint-btn"
           disabled={!canHint}
+          title={props.hintLocked ? 'The last hint unlocks after a wrong answer in this sector.' : undefined}
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
             e.currentTarget.blur();
@@ -213,7 +209,11 @@ export function AstrometryLog(props: Props) {
         >
           REQUEST HINT
           <small>
-            {props.pendingHint ? 'DECRYPTING...' : hintsLeft > 0 ? `${hintsLeft} LEFT · ${nextHintWait}s` : 'NONE LEFT'}
+            {hintsLeft === 0
+              ? 'NONE LEFT'
+              : props.hintLocked
+                ? `${hintsLeft} LEFT · LOCKED`
+                : `${hintsLeft} LEFT${REDESIGN ? '' : ' · +1:00'}`}
           </small>
         </button>
       </div>
@@ -229,15 +229,51 @@ export function AstrometryLog(props: Props) {
   );
 }
 
+/** Sector 1 only (redesign): the whole loop in three steps, like a museum placard. */
+function HowThisWorks({ letters }: { letters: number }) {
+  return (
+    <section className="clue-section how-to" aria-label="How this works">
+      <h3 className="clue-heading">HOW THIS WORKS</h3>
+      <ol className="clues ordered">
+        <li>Solve a star&apos;s X,Y and type it into ARM TARGET below.</li>
+        <li>
+          Line up LOCK: left/right picks the column, up/down picks the row. Then press SPACE. A shot without LOCK is
+          deflected and costs no shield.
+        </li>
+        <li>
+          Every star hides a letter, and these {letters} spell a word. SCAN checks a cell and shows its letter. Click
+          cells to pencil-mark your ideas.
+        </li>
+      </ol>
+    </section>
+  );
+}
+
+/** Accepts "M 3,5" / "MARK 3,5" (toggle a pencil mark) and "M CLEAR". Null when it isn't a mark command. */
+function parseMarkCommand(input: string): { clear: true } | { coord: Coord } | 'invalid' | null {
+  const m = input.trim().match(/^m(?:ark)?\s*(.*)$/i);
+  if (!m) return null;
+  const rest = (m[1] ?? '').trim();
+  if (/^clear$/i.test(rest)) return { clear: true };
+  const coord = parseCoord(rest);
+  return coord ? { coord } : 'invalid';
+}
+
 function ArmTargetInput({
   armed,
   disabled,
+  marks,
   onArm,
+  onMark,
+  onClearMarks,
   onInvalid,
 }: {
   armed: Coord | null;
   disabled: boolean;
+  marks: number;
   onArm: (c: Coord | null) => void;
+  onMark: (c: Coord) => void;
+  onClearMarks: () => void;
   onInvalid: (text: string) => void;
 }) {
   const [value, setValue] = useState('');
@@ -245,7 +281,15 @@ function ArmTargetInput({
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (!value.trim()) {
+    const mark = REDESIGN ? parseMarkCommand(value) : null;
+    if (mark === 'invalid') {
+      onInvalid(value);
+      return;
+    }
+    if (mark) {
+      if ('clear' in mark) onClearMarks();
+      else onMark(mark.coord);
+    } else if (!value.trim()) {
       onArm(null);
     } else {
       const c = parseCoord(value);
@@ -259,6 +303,7 @@ function ArmTargetInput({
     inputRef.current?.blur();
   };
 
+  const idle = REDESIGN ? 'TYPE X,Y THEN ENTER' : 'TYPE 3,5 THEN ENTER';
   return (
     <form className="term-input" onSubmit={submit}>
       <label htmlFor="arm">&gt; ARM TARGET (X,Y)</label>
@@ -269,10 +314,16 @@ function ArmTargetInput({
         disabled={disabled}
         autoComplete="off"
         spellCheck={false}
-        placeholder={armed ? `ARMED ${armed[0]},${armed[1]}` : 'TYPE 3,5 THEN ENTER'}
+        placeholder={armed ? `ARMED ${armed[0]},${armed[1]}` : idle}
+        aria-describedby={REDESIGN ? 'arm-help' : undefined}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === 'Escape' && inputRef.current?.blur()}
       />
+      {REDESIGN && (
+        <small id="arm-help" className="term-help">
+          MARKS {marks}/{MAX_MARKS}: CLICK A CELL OR TYPE M X,Y
+        </small>
+      )}
     </form>
   );
 }

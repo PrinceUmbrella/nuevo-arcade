@@ -1,23 +1,29 @@
+import { REDESIGN } from '../game/ruleset';
+import { formatDuration } from '../hooks/useNow';
+
 interface Props {
   sectorNumber: number;
   sectorCount: number;
   sectorName: string;
   hidden: boolean;
+  elapsedMs: number;
+  penaltyMs: number;
+  started: boolean;
   hitsRemaining: number;
   misses: number;
   maxMisses: number;
 }
 
-export function TopBar({ sectorNumber, sectorCount, sectorName, hidden, hitsRemaining, misses, maxMisses }: Props) {
+export function TopBar({ sectorNumber, sectorCount, sectorName, hidden, elapsedMs, penaltyMs, started, hitsRemaining, misses, maxMisses }: Props) {
   const shieldsLeft = Math.max(0, maxMisses - misses);
   return (
-    <header className="topbar">
+    <header className={REDESIGN ? 'topbar no-timer' : 'topbar'}>
       <div className="topbar-block">
         <div className="label">SECTOR {sectorNumber} OF {sectorCount}</div>
         <div className={`value sector-name ${hidden ? 'classified' : ''}`}>{sectorName}</div>
       </div>
       <div className="topbar-block center">
-        <div className="label">HITS LEFT</div>
+        <div className="label">{REDESIGN ? 'STARS LEFT' : 'HITS LEFT'}</div>
         <div className="value hits">{hitsRemaining}</div>
       </div>
       <div className="topbar-block center">
@@ -36,6 +42,15 @@ export function TopBar({ sectorNumber, sectorCount, sectorName, hidden, hitsRema
           ))}
         </div>
       </div>
+      {!REDESIGN && (
+        <div className="topbar-block right">
+          <div className="label">MISSION TIMER</div>
+          <div className={started ? 'value timer' : 'value timer standby'}>
+            {formatDuration(elapsedMs)}
+            {penaltyMs > 0 && <span className="penalty">+{formatDuration(penaltyMs)}</span>}
+          </div>
+        </div>
+      )}
     </header>
   );
 }

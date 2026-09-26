@@ -2,27 +2,33 @@ import { MASTER_KEY_SEPARATOR, ROUNDS } from '../data/constellations';
 import { normalizeKey } from './cipher';
 import { coordKey } from './grid';
 import { buildLetterGrid } from './letters';
-import type { Coord, HintEntry, LogEntry, LogTone, MissReason, Phase, Round, ScanResult } from './types';
+import { REDESIGN } from './ruleset';
+import type { Coord, HintEntry, LogEntry, LogTone, MissReason, Phase, Round, ScanResult, ShotRejection } from './types';
 
 export const WRONG_HITS_PER_FREE_HINT = 3;
 /** Misses allowed per sector. Reaching it wipes the sector's stars and restarts it. */
 export const MAX_WRONG_HITS = 6;
 /** Free "is this cell in the constellation?" checks per sector. Each also reveals the cell's letter. */
 export const MAX_SCANS = 3;
-export const REBOOT_MS = 10 * 1000;
-export const MISS_COOLDOWN_MS = [2_000, 5_000, 10_000] as const;
-export const HINT_DECRYPT_MS = [15_000, 25_000, 40_000] as const;
+/** Classic rules only: time added for each hint the team requests. The redesign has no clock, so hints are free. */
+export const HINT_PENALTY_MS = REDESIGN ? 0 : 60 * 1000;
+/** Pencil marks allowed on the grid at once (redesign rules only). */
+export const MAX_MARKS = 8;
 export const TEAM_NAME_MAX = 18;
 const MAX_LOG = 40;
 
-export interface TimedWait {
-  startedAt: number;
-  endsAt: number;
-}
+/** Hint text for the active rule set. */
+export const roundHints = (round: Round) => (REDESIGN ? round.hints : (round.classicHints ?? round.hints));
 
-export interface PendingHint extends TimedWait {
-  hintIndex: number;
-}
+/**
+ * Redesign: the last hint in a sector gives a star away, so it stays locked until the team has
+ * made at least one wrong deduction there. Hints are free, so this keeps a team from clicking
+ * straight through to the answer.
+ */
+export const nextHintLocked = (s: GameState) => {
+  const total = roundHints(currentRound(s)).length;
+  return REDESIGN && total > 1 && s.hints.length === total - 1 && !s.sectorMissed;
+};
 
 /** Pairing board: which card sits in each slot, and the number the team wrote on each card. */
 export interface BoardState {
@@ -30,8 +36,6 @@ export interface BoardState {
   rowSlots: (number | null)[];
   colValues: string[];
   rowValues: string[];
-  colOrder: number[];
-  rowOrder: number[];
 }
 
 export interface GameState {
@@ -42,11 +46,8 @@ export interface GameState {
   phase: Phase;
   hits: string[];
   wrongHits: number;
-  missStreak: number;
   hints: HintEntry[];
-  cooldown: TimedWait | null;
-  pendingHint: PendingHint | null;
-  reboot: TimedWait | null;
+  penaltyMs: number;
   /** False while the current round's clues are still encrypted. */
   decrypted: boolean;
   scansUsed: number;
@@ -59,6 +60,10 @@ export interface GameState {
   endedAt: number | null;
   armed: Coord | null;
   armedScan: ScanResult;
+  /** Pencil-marked cells in placement order. Kept through a sector restart. */
+  marks: string[];
+  /** A wrong deduction has happened in this sector (survives a restart). Unlocks the final hint. */
+  sectorMissed: boolean;
   log: LogEntry[];
   nextLogId: number;
 }
@@ -69,12 +74,12 @@ export type GameAction =
   | { type: 'SCAN'; now: number }
   | { type: 'LOG'; text: string; tone: LogTone }
   | { type: 'CORRECT_HIT'; x: number; y: number }
-  | { type: 'WRONG_HIT'; x: number; y: number; reason: MissReason; now: number }
+  | { type: 'WRONG_HIT'; x: number; y: number; reason: MissReason }
+  | { type: 'SHOT_REJECTED'; rejection: ShotRejection }
+  | { type: 'TOGGLE_MARK'; x: number; y: number }
+  | { type: 'CLEAR_MARKS' }
   | { type: 'FLAK_HIT' }
   | { type: 'REQUEST_HINT'; now: number }
-  | { type: 'COMPLETE_HINT' }
-  | { type: 'COMPLETE_COOLDOWN' }
-  | { type: 'CANCEL_WAITS' }
   | { type: 'DECRYPT'; key: string; now: number }
   | { type: 'BOARD_PLACE'; kind: 'col' | 'row'; card: number; slot: number | null }
   | { type: 'BOARD_VALUE'; kind: 'col' | 'row'; card: number; value: string }
@@ -121,18 +126,6 @@ const letterAt = (round: Round, key: string) => {
   return letterGrids.get(round)!.get(key) ?? '?';
 };
 
-function shuffledIndices(length: number): number[] {
-  const order = Array.from({ length }, (_, index) => index);
-  for (let index = order.length - 1; index > 0; index--) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [order[index], order[swapIndex]] = [order[swapIndex], order[index]];
-  }
-  if (order.length > 1 && order.every((value, index) => value === index)) {
-    [order[0], order[1]] = [order[1], order[0]];
-  }
-  return order;
-}
-
 function emptyBoard(round: Round): BoardState | null {
   if (!round.board) return null;
   return {
@@ -140,8 +133,6 @@ function emptyBoard(round: Round): BoardState | null {
     rowSlots: Array(round.board.slots).fill(null),
     colValues: round.board.columnCards.map(() => ''),
     rowValues: round.board.rowCards.map(() => ''),
-    colOrder: shuffledIndices(round.board.columnCards.length),
-    rowOrder: shuffledIndices(round.board.rowCards.length),
   };
 }
 
@@ -159,17 +150,15 @@ function startRound(s: GameState, index: number): GameState {
     phase: 'playing',
     hits: [],
     wrongHits: 0,
-    missStreak: 0,
     hints: [],
-    cooldown: null,
-    pendingHint: null,
-    reboot: null,
     decrypted: !r.cipher,
     scansUsed: 0,
     scanned: [],
     board: emptyBoard(r),
     armed: null,
     armedScan: null,
+    marks: [],
+    sectorMissed: false,
   };
   const order = r.requireOrder ? ' IN SEQUENCE' : '';
   return log(next, `SECTOR ${index + 1} LINK ESTABLISHED. ${r.targets.length} BEACONS TO LOCK${order}`, 'info');
@@ -183,11 +172,8 @@ export function createInitialState(epoch = 0): GameState {
     phase: 'lobby',
     hits: [],
     wrongHits: 0,
-    missStreak: 0,
     hints: [],
-    cooldown: null,
-    pendingHint: null,
-    reboot: null,
+    penaltyMs: 0,
     decrypted: true,
     scansUsed: 0,
     scanned: [],
@@ -198,6 +184,8 @@ export function createInitialState(epoch = 0): GameState {
     endedAt: null,
     armed: null,
     armedScan: null,
+    marks: [],
+    sectorMissed: false,
     log: [],
     nextLogId: 1,
   };
@@ -232,11 +220,15 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
     case 'BEGIN': {
       if (s.phase !== 'lobby') return s;
       const team = a.team.trim().toUpperCase().slice(0, TEAM_NAME_MAX) || 'UNNAMED CREW';
-      return startRound(log({ ...s, team, startedAt: a.now }, `CREW ${team} ON STATION. MISSION STARTED`, 'success'), 0);
+      const started = REDESIGN ? 'MISSION STARTED' : 'MISSION CLOCK STARTED';
+      return startRound(log({ ...s, team, startedAt: a.now }, `CREW ${team} ON STATION. ${started}`, 'success'), 0);
     }
 
     case 'ARM':
       if (a.coord === null) return s.armed === null ? s : { ...s, armed: null, armedScan: null };
+      if (REDESIGN && s.hits.includes(coordKey(a.coord[0], a.coord[1]))) {
+        return log(s, `(${a.coord[0]},${a.coord[1]}) IS ALREADY A STAR. ARM ANOTHER CELL`, 'warn');
+      }
       return log({ ...s, armed: a.coord, armedScan: null }, `TARGET ARMED (${a.coord[0]},${a.coord[1]})`, 'info');
 
     case 'SCAN': {
@@ -275,8 +267,10 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       }
       const hits = [...s.hits, key];
       const beacon = round.requireOrder ? `BEACON ${hits.length}` : `TARGET (${a.x},${a.y})`;
+      // Under the redesign a shot can only land on the armed cell, so it is spent once it becomes a star.
+      const spent = REDESIGN && s.armed !== null && coordKey(s.armed[0], s.armed[1]) === key;
       let next = log(
-        { ...s, hits, missStreak: 0, cooldown: null },
+        spent ? { ...s, hits, armed: null, armedScan: null } : { ...s, hits },
         `${beacon} NEUTRALIZED. LETTER ${letterAt(round, key)} LOCKED`,
         'success',
       );
@@ -293,48 +287,58 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
     case 'WRONG_HIT': {
       if (s.phase !== 'playing') return s;
       const round = currentRound(s);
+      const hints = roundHints(round);
       const wrongHits = s.wrongHits + 1;
-      const missStreak = s.missStreak + 1;
-      const cooldownMs = MISS_COOLDOWN_MS[Math.min(missStreak, MISS_COOLDOWN_MS.length) - 1];
-      const what = a.reason === 'order' ? 'OUT OF SEQUENCE. SHOT REJECTED' : 'TELEMETRY DESYNC - RECALIBRATING';
-      let next = log(
-        {
-          ...s,
-          wrongHits,
-          missStreak,
-          cooldown: wrongHits < MAX_WRONG_HITS ? { startedAt: a.now, endsAt: a.now + cooldownMs } : null,
-        },
-        `${what} (MISS ${wrongHits} OF ${MAX_WRONG_HITS})`,
-        'error',
-      );
-      if (wrongHits % WRONG_HITS_PER_FREE_HINT === 0 && s.hints.length < round.hints.length) {
+      const what = REDESIGN
+        ? `(${a.x},${a.y}) ${a.reason === 'order' ? 'OUT OF SEQUENCE' : 'NOT IN CONSTELLATION'}. SHIELD LOST`
+        : a.reason === 'order'
+          ? 'OUT OF SEQUENCE. SHOT REJECTED'
+          : 'TELEMETRY DESYNC - RECALIBRATING';
+      // Redesign: the armed answer has been checked and was wrong, so it is disarmed to avoid a second penalty.
+      const checked = REDESIGN ? { armed: null, armedScan: null } : {};
+      let next = log({ ...s, ...checked, wrongHits, sectorMissed: true }, `${what} (MISS ${wrongHits} OF ${MAX_WRONG_HITS})`, 'error');
+      if (wrongHits >= MAX_WRONG_HITS) {
+        return log({ ...next, phase: 'failed', armed: null, armedScan: null }, 'SHIELDS DEPLETED. SECTOR PROGRESS LOST, RESTARTING SECTOR', 'error');
+      }
+      if (nextHintLocked(s) && !nextHintLocked(next)) next = log(next, 'FINAL HINT UNLOCKED', 'warn');
+      if (wrongHits % WRONG_HITS_PER_FREE_HINT === 0 && s.hints.length < hints.length) {
         next = {
           ...next,
-          hints: [...s.hints, { text: round.hints[s.hints.length], auto: true }],
-          pendingHint: null,
+          hints: [...s.hints, { text: hints[s.hints.length], auto: true }],
         };
-        next = log(next, `${WRONG_HITS_PER_FREE_HINT} MISSES DETECTED. FREE HINT UNLOCKED`, 'warn');
-      }
-      if (wrongHits >= MAX_WRONG_HITS) {
-        return log(
-          {
-            ...next,
-            phase: 'failed',
-            armed: null,
-            armedScan: null,
-            cooldown: null,
-            reboot: { startedAt: a.now, endsAt: a.now + REBOOT_MS },
-          },
-          'SHIELDS DEPLETED. SYSTEMS REBOOTING',
-          'error',
-        );
+        next = log(next, `${WRONG_HITS_PER_FREE_HINT} MISSES DETECTED. ${REDESIGN ? 'NEXT' : 'FREE'} HINT UNLOCKED`, 'warn');
       }
       return next;
     }
 
+    case 'SHOT_REJECTED': {
+      if (s.phase !== 'playing') return s;
+      const r = a.rejection;
+      if (r.kind === 'no-target') {
+        const text = 'NO TARGET ARMED. TYPE X,Y IN ARM TARGET';
+        return s.log[s.log.length - 1]?.text === text ? s : log(s, text, 'warn');
+      }
+      const [tx, ty] = r.target;
+      if (r.kind === 'respawning') return log(s, `(${tx},${ty}) IS RESPAWNING. WAIT, THEN FIRE AGAIN`, 'warn');
+      const where = r.aim ? `CANNON ON (${r.aim[0]},${r.aim[1]}), TARGET (${tx},${ty})` : 'CANNON OFF THE GRID';
+      return log(s, `DEFLECTED: ${where}. NO SHIELD LOST`, 'warn');
+    }
+
+    case 'TOGGLE_MARK': {
+      if (s.phase !== 'playing') return s;
+      const key = coordKey(a.x, a.y);
+      if (s.marks.includes(key)) return { ...s, marks: s.marks.filter((m) => m !== key) };
+      if (s.hits.includes(key)) return s;
+      if (s.marks.length >= MAX_MARKS) return log(s, `MARK LIMIT IS ${MAX_MARKS}. CLICK A MARK TO REMOVE IT`, 'warn');
+      return { ...s, marks: [...s.marks, key] };
+    }
+
+    case 'CLEAR_MARKS':
+      return s.marks.length ? { ...s, marks: [] } : s;
+
     case 'RESTART_SECTOR': {
       if (s.phase !== 'failed') return s;
-      // Only the shots reset. Hints, scans (and their letters), the board and a solved cipher stay.
+      // Only the shots reset. Hints, scans (and their letters), marks, the board and a solved cipher stay.
       return {
         ...startRound(s, s.roundIndex),
         hints: s.hints,
@@ -342,6 +346,8 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
         scansUsed: s.scansUsed,
         scanned: s.scanned,
         board: s.board,
+        marks: s.marks,
+        sectorMissed: s.sectorMissed,
         sectorRestarts: s.sectorRestarts + 1,
       };
     }
@@ -375,54 +381,14 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
 
     case 'REQUEST_HINT': {
       if (s.phase !== 'playing' && s.phase !== 'identify') return s;
-      const round = currentRound(s);
-      if (s.pendingHint || s.hints.length >= round.hints.length) return s;
-      const hintIndex = s.hints.length;
-      const waitMs = HINT_DECRYPT_MS[Math.min(hintIndex, HINT_DECRYPT_MS.length - 1)];
-      return log(
-        {
-          ...s,
-          pendingHint: { hintIndex, startedAt: a.now, endsAt: a.now + waitMs },
-        },
-        `DECRYPTING HINT ${hintIndex + 1}. TRANSMISSION ETA ${waitMs / 1000}s`,
-        'warn',
-      );
-    }
-
-    case 'COMPLETE_HINT': {
-      if (!s.pendingHint) return s;
-      const round = currentRound(s);
-      const hintIndex = s.pendingHint.hintIndex;
-      if (hintIndex !== s.hints.length || hintIndex >= round.hints.length) {
-        return { ...s, pendingHint: null };
-      }
+      const hints = roundHints(currentRound(s));
+      if (s.hints.length >= hints.length || nextHintLocked(s)) return s;
       const next: GameState = {
         ...s,
-        pendingHint: null,
-        hints: [...s.hints, { text: round.hints[hintIndex], auto: false }],
+        penaltyMs: s.penaltyMs + HINT_PENALTY_MS,
+        hints: [...s.hints, { text: hints[s.hints.length], auto: false }],
       };
-      return log(next, 'TRANSMISSION DECRYPTED. HINT AVAILABLE', 'warn');
-    }
-
-    case 'COMPLETE_COOLDOWN':
-      return s.cooldown ? { ...s, cooldown: null } : s;
-
-    case 'CANCEL_WAITS': {
-      if (!s.cooldown && !s.pendingHint) return s;
-      let next = s.cooldown ? { ...s, cooldown: null } : s;
-      if (next.pendingHint) {
-        const hintIndex = next.pendingHint.hintIndex;
-        const round = currentRound(next);
-        next = {
-          ...next,
-          pendingHint: null,
-          hints:
-            hintIndex === next.hints.length && hintIndex < round.hints.length
-              ? [...next.hints, { text: round.hints[hintIndex], auto: false }]
-              : next.hints,
-        };
-      }
-      return log(next, 'STAFF: ACTIVE WAITS CLEARED', 'warn');
+      return log(next, REDESIGN ? `HINT ${next.hints.length} DECRYPTED` : 'HINT DECRYPTED. +1:00 ADDED TO MISSION TIME', 'warn');
     }
 
     case 'LINES_DRAWN': {
