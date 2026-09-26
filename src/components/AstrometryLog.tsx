@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ROUNDS } from '../data/constellations';
 import { vigenere } from '../game/cipher';
-import { parseCoord } from '../game/grid';
-import { REDESIGN } from '../game/ruleset';
-import { MAX_MARKS, roundHints } from '../game/state';
+import { COORD_LABEL, formatCoord, parseCoord } from '../game/grid';
+import { FREE_AIM, REDESIGN } from '../game/ruleset';
+import { MAX_MARKS, roundClues, roundHints } from '../game/state';
 import type { Coord, HintEntry, LogEntry, Phase, Round, ScanResult } from '../game/types';
 import { useTypewriter } from '../hooks/useTypewriter';
 
@@ -58,7 +58,7 @@ export function AstrometryLog(props: Props) {
     .join(' ');
   const sections = useMemo(
     () =>
-      round.clues.map((s, i) => {
+      roundClues(round).map((s, i) => {
         const key = round.cipher?.key ?? '';
         const scramble = (t: string) => (encrypted ? vigenere(t, key) : t);
         return { key: String(i), ordered: s.ordered, heading: scramble(s.heading), items: s.items.map(scramble) };
@@ -102,7 +102,7 @@ export function AstrometryLog(props: Props) {
               Your Navigator reads the beacons aloud. The Gunner stays at this screen and fires in sequence.
             </p>
             <p className="navigator-url">
-              Navigator link: <b>{window.location.host}/?view=navigator</b>
+              Navigator link: <b>{window.location.host}/?view=navigator{REDESIGN ? '' : '&rules=classic'}</b>
             </p>
           </div>
         ) : (
@@ -235,7 +235,11 @@ function HowThisWorks({ letters }: { letters: number }) {
     <section className="clue-section how-to" aria-label="How this works">
       <h3 className="clue-heading">HOW THIS WORKS</h3>
       <ol className="clues ordered">
-        <li>Solve a star&apos;s X,Y and type it into ARM TARGET below.</li>
+        <li>
+          {FREE_AIM
+            ? "Solve a star's row and column. Type ROW,COL into ARM TARGET below, or aim at its cell and press SPACE."
+            : "Solve a star's row and column, then type ROW,COL (row first) into ARM TARGET below."}
+        </li>
         <li>
           Line up LOCK: left/right picks the column, up/down picks the row. Then press SPACE. A shot without LOCK is
           deflected and costs no shield.
@@ -249,7 +253,7 @@ function HowThisWorks({ letters }: { letters: number }) {
   );
 }
 
-/** Accepts "M 3,5" / "MARK 3,5" (toggle a pencil mark) and "M CLEAR". Null when it isn't a mark command. */
+/** Accepts "M 5,3" / "MARK 5,3" (toggle a pencil mark) and "M CLEAR". Null when it isn't a mark command. */
 function parseMarkCommand(input: string): { clear: true } | { coord: Coord } | 'invalid' | null {
   const m = input.trim().match(/^m(?:ark)?\s*(.*)$/i);
   if (!m) return null;
@@ -303,10 +307,10 @@ function ArmTargetInput({
     inputRef.current?.blur();
   };
 
-  const idle = REDESIGN ? 'TYPE X,Y THEN ENTER' : 'TYPE 3,5 THEN ENTER';
+  const idle = REDESIGN ? `TYPE ${COORD_LABEL} THEN ENTER` : 'TYPE 3,5 THEN ENTER';
   return (
     <form className="term-input" onSubmit={submit}>
-      <label htmlFor="arm">&gt; ARM TARGET (X,Y)</label>
+      <label htmlFor="arm">&gt; ARM TARGET ({COORD_LABEL})</label>
       <input
         id="arm"
         ref={inputRef}
@@ -314,14 +318,14 @@ function ArmTargetInput({
         disabled={disabled}
         autoComplete="off"
         spellCheck={false}
-        placeholder={armed ? `ARMED ${armed[0]},${armed[1]}` : idle}
+        placeholder={armed ? `ARMED ${formatCoord(armed[0], armed[1])}` : idle}
         aria-describedby={REDESIGN ? 'arm-help' : undefined}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === 'Escape' && inputRef.current?.blur()}
       />
       {REDESIGN && (
         <small id="arm-help" className="term-help">
-          MARKS {marks}/{MAX_MARKS}: CLICK A CELL OR TYPE M X,Y
+          MARKS {marks}/{MAX_MARKS}: CLICK A CELL OR TYPE M {COORD_LABEL}
         </small>
       )}
     </form>

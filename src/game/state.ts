@@ -1,9 +1,9 @@
 import { MASTER_KEY_SEPARATOR, ROUNDS } from '../data/constellations';
 import { normalizeKey } from './cipher';
-import { coordKey } from './grid';
+import { COORD_LABEL, coordKey, formatCoord } from './grid';
 import { buildLetterGrid } from './letters';
-import { REDESIGN } from './ruleset';
-import type { Coord, HintEntry, LogEntry, LogTone, MissReason, Phase, Round, ScanResult, ShotRejection } from './types';
+import { FREE_AIM, REDESIGN } from './ruleset';
+import type { ClueSection, Coord, HintEntry, LogEntry, LogTone, MissReason, Phase, Round, ScanResult, ShotRejection } from './types';
 
 export const WRONG_HITS_PER_FREE_HINT = 3;
 /** Misses allowed per sector. Reaching it wipes the sector's stars and restarts it. */
@@ -19,6 +19,11 @@ const MAX_LOG = 40;
 
 /** Hint text for the active rule set. */
 export const roundHints = (round: Round) => (REDESIGN ? round.hints : (round.classicHints ?? round.hints));
+
+/** Clue text for the active rule set (the redesign writes coordinates row first). */
+export const roundClues = (round: Round): ClueSection[] => (REDESIGN ? round.clues : (round.classicClues ?? round.clues));
+
+const at = (c: Coord) => `(${formatCoord(c[0], c[1])})`;
 
 /**
  * Redesign: the last hint in a sector gives a star away, so it stays locked until the team has
@@ -64,6 +69,8 @@ export interface GameState {
   marks: string[];
   /** A wrong deduction has happened in this sector (survives a restart). Unlocks the final hint. */
   sectorMissed: boolean;
+  /** Redesign: the crew answered the look-up question on the victory screen. */
+  finalSolved: boolean;
   log: LogEntry[];
   nextLogId: number;
 }
@@ -92,6 +99,8 @@ export type GameAction =
   | { type: 'FINALE_MISS'; kind: 'off-column' | 'passed' }
   | { type: 'ADVANCE'; now: number }
   | { type: 'SKIP'; now: number }
+  | { type: 'RESTORE'; state: GameState }
+  | { type: 'FINAL_SOLVED' }
   | { type: 'RESET' };
 
 export const currentRound = (s: GameState): Round => ROUNDS[s.roundIndex];
@@ -111,6 +120,12 @@ const normalizeName = (v: string) =>
     .replace(/[^A-Z0-9 ]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+/** True when `input` matches one of `answers`, ignoring case, spaces and punctuation. */
+export const matchesAnswer = (answers: string[], input: string) => {
+  const n = normalizeName(input);
+  return n.length > 0 && answers.some((a) => normalizeName(a) === n);
+};
 
 export const isAcceptedName = (round: Round, input: string) => {
   const n = normalizeName(input);
@@ -186,6 +201,7 @@ export function createInitialState(epoch = 0): GameState {
     armedScan: null,
     marks: [],
     sectorMissed: false,
+    finalSolved: false,
     log: [],
     nextLogId: 1,
   };
@@ -225,11 +241,15 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
     }
 
     case 'ARM':
-      if (a.coord === null) return s.armed === null ? s : { ...s, armed: null, armedScan: null };
-      if (REDESIGN && s.hits.includes(coordKey(a.coord[0], a.coord[1]))) {
-        return log(s, `(${a.coord[0]},${a.coord[1]}) IS ALREADY A STAR. ARM ANOTHER CELL`, 'warn');
+      if (a.coord === null) {
+        if (s.armed === null) return s;
+        const cleared = { ...s, armed: null, armedScan: null };
+        return REDESIGN ? log(cleared, 'TARGET CLEARED', 'info') : cleared;
       }
-      return log({ ...s, armed: a.coord, armedScan: null }, `TARGET ARMED (${a.coord[0]},${a.coord[1]})`, 'info');
+      if (REDESIGN && s.hits.includes(coordKey(a.coord[0], a.coord[1]))) {
+        return log(s, `${at(a.coord)} IS ALREADY A STAR. ARM ANOTHER CELL`, 'warn');
+      }
+      return log({ ...s, armed: a.coord, armedScan: null }, `TARGET ARMED ${at(a.coord)}`, 'info');
 
     case 'SCAN': {
       if (s.phase !== 'playing' || !s.armed || s.armedScan !== null || s.scansUsed >= MAX_SCANS) return s;
@@ -247,7 +267,7 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       };
       return log(
         next,
-        `SCAN (${x},${y}): ${inPlane ? 'IN' : 'NOT IN'} THE CONSTELLATION. LETTER ${letterAt(round, key)}. ${left} ${left === 1 ? 'SCAN' : 'SCANS'} LEFT`,
+        `SCAN ${at([x, y])}: ${inPlane ? 'IN' : 'NOT IN'} THE CONSTELLATION. LETTER ${letterAt(round, key)}. ${left} ${left === 1 ? 'SCAN' : 'SCANS'} LEFT`,
         inPlane ? 'success' : 'warn',
       );
     }
@@ -266,7 +286,7 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
         if (coordKey(ex, ey) !== key) return s;
       }
       const hits = [...s.hits, key];
-      const beacon = round.requireOrder ? `BEACON ${hits.length}` : `TARGET (${a.x},${a.y})`;
+      const beacon = round.requireOrder ? `BEACON ${hits.length}` : `TARGET ${at([a.x, a.y])}`;
       // Under the redesign a shot can only land on the armed cell, so it is spent once it becomes a star.
       const spent = REDESIGN && s.armed !== null && coordKey(s.armed[0], s.armed[1]) === key;
       let next = log(
@@ -290,7 +310,7 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       const hints = roundHints(round);
       const wrongHits = s.wrongHits + 1;
       const what = REDESIGN
-        ? `(${a.x},${a.y}) ${a.reason === 'order' ? 'OUT OF SEQUENCE' : 'NOT IN CONSTELLATION'}. SHIELD LOST`
+        ? `${at([a.x, a.y])} ${a.reason === 'order' ? 'OUT OF SEQUENCE' : 'NOT IN CONSTELLATION'}. SHIELD LOST`
         : a.reason === 'order'
           ? 'OUT OF SEQUENCE. SHOT REJECTED'
           : 'TELEMETRY DESYNC - RECALIBRATING';
@@ -315,12 +335,13 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       if (s.phase !== 'playing') return s;
       const r = a.rejection;
       if (r.kind === 'no-target') {
-        const text = 'NO TARGET ARMED. TYPE X,Y IN ARM TARGET';
+        const text = FREE_AIM
+          ? `AIM AT A GRID CELL, OR TYPE ${COORD_LABEL} IN ARM TARGET`
+          : `NO TARGET ARMED. TYPE ${COORD_LABEL} IN ARM TARGET`;
         return s.log[s.log.length - 1]?.text === text ? s : log(s, text, 'warn');
       }
-      const [tx, ty] = r.target;
-      if (r.kind === 'respawning') return log(s, `(${tx},${ty}) IS RESPAWNING. WAIT, THEN FIRE AGAIN`, 'warn');
-      const where = r.aim ? `CANNON ON (${r.aim[0]},${r.aim[1]}), TARGET (${tx},${ty})` : 'CANNON OFF THE GRID';
+      if (r.kind === 'respawning') return log(s, `${at(r.target)} IS RESPAWNING. WAIT, THEN FIRE AGAIN`, 'warn');
+      const where = r.aim ? `CANNON ON ${at(r.aim)}, TARGET ${at(r.target)}` : 'CANNON OFF THE GRID';
       return log(s, `DEFLECTED: ${where}. NO SHIELD LOST`, 'warn');
     }
 
@@ -452,6 +473,23 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       }
       return startRound(next, s.roundIndex + 1);
     }
+
+    case 'RESTORE': {
+      // Redesign: resume a saved game after a refresh. A new epoch makes the canvas reload the
+      // sector; the armed target is dropped so the team re-arms deliberately.
+      if (s.phase !== 'lobby') return s;
+      const restored: GameState = {
+        ...a.state,
+        epoch: s.epoch + 1,
+        armed: null,
+        armedScan: null,
+        finalSolved: a.state.finalSolved ?? false,
+      };
+      return log(restored, 'MISSION RESUMED', 'success');
+    }
+
+    case 'FINAL_SOLVED':
+      return s.phase === 'victory' && !s.finalSolved ? log({ ...s, finalSolved: true }, 'FINAL ANSWER CONFIRMED', 'success') : s;
 
     case 'RESET':
       return createInitialState(s.epoch + 1);

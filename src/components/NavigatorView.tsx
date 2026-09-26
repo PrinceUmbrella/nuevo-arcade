@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ROUNDS } from '../data/constellations';
+import { roundClues } from '../game/state';
 import { readPublishedSector, SECTOR_SYNC_KEY } from '../game/leaderboard';
 
 /**
@@ -34,7 +35,7 @@ export function NavigatorView() {
           <section key={r.name}>
             <h2>SECTOR {i + 1}: {r.hiddenName ? 'CLASSIFIED' : r.name}</h2>
             <p className="navigator-mission">{r.missionText}</p>
-            {r.clues.map((c) => {
+            {roundClues(r).map((c) => {
               const List = c.ordered ? 'ol' : 'ul';
               return (
                 <div key={c.heading}>

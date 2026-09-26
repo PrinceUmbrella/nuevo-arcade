@@ -1,3 +1,5 @@
+import { REDESIGN } from './ruleset';
+
 /** Logical canvas geometry. The engine scales this to fit its container. */
 export const W = 1050;
 export const H = 910;
@@ -20,8 +22,18 @@ export const coordKey = (x: number, y: number) => `${x},${y}`;
 
 export const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/** Accepts "3,5", "3 5", "(3, 5)", "3;5". Returns null if invalid. */
+/**
+ * Coordinate order players type and read. The redesign is row first; classic keeps X,Y.
+ * Cells are always stored as [column, row] (x, y), so only input and display change.
+ */
+export const ROW_FIRST = REDESIGN;
+export const COORD_LABEL = ROW_FIRST ? 'ROW,COL' : 'X,Y';
+export const formatCoord = (x: number, y: number) => (ROW_FIRST ? `${y},${x}` : `${x},${y}`);
+
+/** Accepts "5,3", "5 3", "(5, 3)", "5;3" in the active order. Returns [column, row], or null if invalid. */
 export function parseCoord(input: string): [number, number] | null {
   const m = input.trim().match(/^\(?\s*([1-8])\s*[,;\s]\s*([1-8])\s*\)?$/);
-  return m ? [Number(m[1]), Number(m[2])] : null;
+  if (!m) return null;
+  const [a, b] = [Number(m[1]), Number(m[2])];
+  return ROW_FIRST ? [b, a] : [a, b];
 }

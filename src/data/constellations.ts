@@ -11,6 +11,11 @@
  *  - targets            [X, Y] cells. X = column 1-8 LEFT to RIGHT,
  *                       Y = row 1-8 BOTTOM to TOP (Y = 1 is nearest the cannon).
  *                       With requireOrder: true this is also the firing order.
+ *                       Cells are always stored column first like this, but
+ *                       players type and read them ROW FIRST (row,col) in the
+ *                       redesign. Write any coordinate inside clue or hint
+ *                       text as (row,col); ?rules=classic shows (X,Y) text
+ *                       from classicClues / classicHints.
  *  - keyFragment        ONE LETTER PER TARGET, in targets order. Each alien
  *                       hides a letter, shown once it is hit or SCANned; the
  *                       stars spell the fragment. Cells touching a target
@@ -19,6 +24,7 @@
  *  - clues              Sections of clue text shown in the log. Nothing checks
  *                       them against `targets`, so re-solve your own puzzle
  *                       after editing and make sure it has ONE answer.
+ *  - classicClues       Optional. Original clue text for ?rules=classic.
  *  - decoys             Optional red-herring cells with their own letter.
  *                       Hitting one costs a shield like any miss.
  *  - requireOrder       Optional. Out-of-sequence hits cost a shield.
@@ -40,10 +46,19 @@
  *                       Defaults to true. sway and flak are ignored with
  *                       ?rules=classic, which always uses full sway and flak.
  *  - hints              Revealed in order: free on request, or automatically
- *                       every 3 misses. There is no clock. The LAST hint should
- *                       be the strongest (it may give a star away): it stays
- *                       locked until the team makes a wrong deduction in that
- *                       sector (nextHintLocked in state.ts). 6 misses in a sector
+ *                       every 3 misses. There is no clock. Every hint must add
+ *                       something the mission text, clues and board don't
+ *                       already say, and hints 1-2 must never state a
+ *                       coordinate or a card's value. They point at HOW to
+ *                       think, not WHAT the answer is. The ladder used here:
+ *                         1. trivia help: a memory hook for each fact, never
+ *                            the number itself,
+ *                         2. the reasoning step teams get stuck on, with no
+ *                            numbers,
+ *                         3. one star, never the whole constellation.
+ *                       The LAST hint stays locked until the team makes a
+ *                       wrong deduction in that sector (nextHintLocked in
+ *                       state.ts). 6 misses in a sector
  *                       restarts it (MAX_WRONG_HITS in state.ts). Only a wrong
  *                       deduction counts as a miss; a shot fired without LOCK
  *                       is deflected and costs nothing but a short cooldown.
@@ -54,17 +69,22 @@
  *  - acceptedNames      Answers accepted for hidden rounds. Case, spaces and
  *                       punctuation are ignored.
  *
- *  ANSWER KEY (staff)
- *  Sector 1  Mintaka (3,5) M, Alnilam (4,4) A, Alnitak (5,3) P.
+ *  ANSWER KEY (staff), written as players type them: (row,col).
+ *  With ?rules=classic players type (col,row), so swap each pair.
+ *  Sector 1  Mintaka (5,3) M, Alnilam (4,4) A, Alnitak (3,5) P.
  *  Sector 2  Columns 1,2,4,6,7,8: notes 1-2 put the outer stars in 1 and 7,
  *            so 8 is interference. Rows 3-7 follow the height pattern.
- *            Segin (1,6) S, Ruchbah (2,4) T, Gamma Cas (4,5) A,
- *            Schedar (6,3) R, Caph (7,7) S. Decoy (8,7) X.
- *  Sector 3  Firing order: Dubhe (1,7) P, Merak (1,5) O, Phecda (3,4) L,
- *            Megrez (3,6) A, Alioth (5,6) R, Mizar (6,5) I, Alkaid (8,4) S.
- *            The handle attaches at Megrez, as in the real sky. Decoy (8,7) Q.
+ *            Segin (6,1) S, Ruchbah (4,2) T, Gamma Cas (5,4) A,
+ *            Schedar (3,6) R, Caph (7,7) S. Decoy (7,8) X.
+ *  Sector 3  Beacon trivia (redesign): rainbow colors 7, Earth's moons 1,
+ *            seasons 4, atmosphere layers 5, pre-telescope planets 5,
+ *            Perseverance wheels 6. None of it repeats Sectors 1-2.
+ *            Firing order: Dubhe (7,1) P, Merak (5,1) O, Phecda (4,3) L,
+ *            Megrez (6,3) A, Alioth (6,5) R, Mizar (5,6) I, Alkaid (4,8) S.
+ *            The handle attaches at Megrez, as in the real sky. Decoy (7,8) Q.
  *            Finale: POLARIS mothership, hit while over column 1.
  *  Master key: MAP-STARS-POLARIS
+ *  Final question (redesign): POLARIS is in URSA MINOR, the Little Dipper.
  * ============================================================================
  */
 import type { Round } from '../game/types';
@@ -73,6 +93,22 @@ export const MASTER_KEY_SEPARATOR = '-';
 
 /** Shown on the victory screen under the master key. */
 export const VICTORY_LINE = 'The Pointers point north, to POLARIS. Master key assembled.';
+
+/**
+ * Redesign only: after the master key, the crew looks up one fact about it. Their answer is what
+ * they take to the final terminal. Pick a fact that is stable and quick to search, and that the
+ * game never states on screen. Matching ignores case, spaces and punctuation.
+ */
+export const FINAL_QUESTION = {
+  prompt: 'The master key ends at POLARIS. Look it up: which constellation is POLARIS part of?',
+  answer: 'URSA MINOR (THE LITTLE DIPPER)',
+  accepted: ['URSA MINOR', 'LITTLE DIPPER', 'THE LITTLE DIPPER', 'LITTLE BEAR', 'THE LITTLE BEAR'],
+  /** Answers that are close but wrong get this nudge instead of a plain "no". */
+  nearMiss: {
+    answers: ['URSA MAJOR', 'BIG DIPPER', 'THE BIG DIPPER', 'GREAT BEAR', 'THE GREAT BEAR', 'THE PLOUGH', 'PLOUGH'],
+    reply: "That's the pattern you just mapped. POLARIS belongs to its smaller neighbor.",
+  },
+};
 
 export const ROUNDS: Round[] = [
   {
@@ -99,6 +135,16 @@ export const ROUNDS: Round[] = [
       {
         heading: 'SURVIVING TELEMETRY',
         items: [
+          "Signal A: The westernmost star (Mintaka). Row = number of IAU-recognized dwarf planets. Column = Earth's position from the Sun.",
+          'Signal B: The easternmost star (Alnitak) sits in the column of the largest planet. Its row was lost.',
+          'Signal C: The middle star (Alnilam) sits in the row matching the number of Galilean moons. Its column was lost.',
+        ],
+      },
+    ],
+    classicClues: [
+      {
+        heading: 'SURVIVING TELEMETRY',
+        items: [
           "Signal A: The westernmost star (Mintaka). Column = Earth's position from the Sun. Row = number of IAU-recognized dwarf planets.",
           'Signal B: The easternmost star (Alnitak) sits in the column of the largest planet. Its row was lost.',
           'Signal C: The middle star (Alnilam) sits in the row matching the number of Galilean moons. Its column was lost.',
@@ -106,9 +152,9 @@ export const ROUNDS: Round[] = [
       },
     ],
     hints: [
-      'Facts you may need: Earth is planet 3, the IAU recognizes 5 dwarf planets, Jupiter is planet 5, and it has 4 Galilean moons.',
-      "Even steps: the middle star's column is halfway between 3 and 5, and each step right drops one row.",
-      'The belt is (3,5), (4,4), (5,3).',
+      'Trivia help: count out from the Sun to find Earth. Pluto was moved into the IAU dwarf-planet group in 2006. The largest planet is the one with the Great Red Spot, and Galileo was the first to see its big moons.',
+      '"Evenly spaced" means the middle star sits exactly halfway between the other two, in its row and in its column. Use that to fill in each lost number.',
+      'Mintaka is (5,3). Follow the line from there.',
     ],
     classicHints: ['Straight line, even steps.', 'Mintaka is (3,5). Walk the line.', 'Alnilam is (4,4).'],
     acceptedNames: [],
@@ -165,6 +211,11 @@ export const ROUNDS: Round[] = [
       },
     ],
     hints: [
+      'Trivia help: the Apollo landings ran from Apollo 11 to 17, but one mission in that range turned back. "Giant planets" counts the gas giants and the ice giants together. Rocky planets are the ones inside the asteroid belt.',
+      'Rank the five row numbers from lowest to highest. Note 3 is written in ranks, not row numbers, so swap each rank for the row number that holds it.',
+      'Schedar is (3,6).',
+    ],
+    classicHints: [
       "One column number doesn't belong. Check note 2.",
       'Sort each stream, then use the height pattern.',
       'Schedar is (6,3).',
@@ -205,6 +256,21 @@ export const ROUNDS: Round[] = [
         heading: 'BEACONS, IN FIRING SEQUENCE',
         ordered: true,
         items: [
+          'Row = number of colors in a rainbow. Column = number of moons Earth has.',
+          'Directly below Beacon 1, two rows down. (Together they are called "the Pointers." Remember that.)',
+          'In the row matching the number of seasons in a year, two columns right of Beacon 2.',
+          'Directly above Beacon 3, two rows up. Beacons 1 through 4 close into a four-sided shape.',
+          "In the same row as Beacon 4, in the column matching the number of major layers in Earth's atmosphere.",
+          "A famous double star. Row = number of planets (besides Earth) people knew about before telescopes. Column = number of wheels on NASA's Perseverance rover.",
+          "Two signals claim to be the final beacon: (4,8) and (7,8). The true one continues the tail's downward curve.",
+        ],
+      },
+    ],
+    classicClues: [
+      {
+        heading: 'BEACONS, IN FIRING SEQUENCE',
+        ordered: true,
+        items: [
           "Column = Mercury's position from the Sun. Row = number of planets not named Earth.",
           'Directly below Beacon 1, two rows down. (Together they are called "the Pointers." Remember that.)',
           'In the row matching the number of rocky planets, two columns right of Beacon 2.',
@@ -216,9 +282,9 @@ export const ROUNDS: Round[] = [
       },
     ],
     hints: [
-      'Beacons 1 to 4 make a box; the rest trail off like a handle.',
-      "Beacon 1: Mercury is planet 1, and 8 planets minus Earth leaves 7. The beacon letters spell a star's name.",
-      'Beacon 3 is (3,4).',
+      "Trivia help: the rainbow's colors spell out a name, ROY G. BIV. Earth's atmosphere runs from the troposphere up to the exosphere. Before telescopes, people only knew the planets bright enough to see by eye.",
+      'For the final beacon, check whether the tail was rising or falling from Beacon 5 to Beacon 6. The true signal keeps going the same way. Finished, the shape looks like a kitchen ladle.',
+      'Beacon 3 is (4,3).',
     ],
     classicHints: [
       'Beacons 1 to 4 make a box; the rest trail off like a handle.',

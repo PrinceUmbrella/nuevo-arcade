@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { REDESIGN } from '../game/ruleset';
+import { FREE_AIM, REDESIGN } from '../game/ruleset';
 import { MAX_MARKS, MAX_SCANS, MAX_WRONG_HITS } from '../game/state';
 import { useDialogFocus } from '../hooks/useDialogFocus';
 import { Key } from './Key';
@@ -31,7 +31,7 @@ function RedesignControls() {
     <>
       <dl>
         <dt>ARM TARGET</dt>
-        <dd>Type X,Y and press Enter. The cannon only fires at this cell</dd>
+        <dd>Type ROW,COL (row first) and press Enter. The cannon only fires at this cell</dd>
         <dt>
           <Key arrow="left" />
           <Key arrow="right" /> or <Key>A</Key>
@@ -43,22 +43,25 @@ function RedesignControls() {
           <Key arrow="down" /> or <Key>W</Key>
           <Key>S</Key>
         </dt>
-        <dd>Set the row (Y) the shot detonates on</dd>
+        <dd>Set the row the shot detonates on</dd>
         <dt>
           <Key>SPACE</Key>
         </dt>
-        <dd>Fire on LOCK. Without LOCK the shot is deflected: no shield lost, short cooldown</dd>
+        <dd>
+          {FREE_AIM && 'With nothing armed, arms the cell you are aiming at (Esc clears it). '}
+          Fire on LOCK. Without LOCK the shot is deflected: no shield lost, short cooldown
+        </dd>
         <dt>SCAN</dt>
         <dd>Is the armed cell in the constellation? Also shows its hidden letter. {MAX_SCANS} per sector</dd>
         <dt>MARK</dt>
-        <dd>Click a cell or type M X,Y to pencil-mark it (up to {MAX_MARKS}). M CLEAR removes all</dd>
+        <dd>Click a cell or type M ROW,COL to pencil-mark it (up to {MAX_MARKS}). M CLEAR removes all</dd>
         <dt>
           <Key>?</Key>
         </dt>
         <dd>Show or hide this legend</dd>
       </dl>
       <p>
-        X counts left to right. Y counts bottom to top. <b>Y = 1 is the bottom row.</b>
+        Coordinates are ROW,COL. Rows count bottom to top and columns left to right. <b>Row 1 is the bottom row.</b>
       </p>
       <p>
         Every Nuvi hides a letter, and the right stars spell a word. Hitting a cell that isn&apos;t in the

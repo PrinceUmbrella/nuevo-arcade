@@ -13,10 +13,12 @@ import {
   cellCenterX,
   cellCenterY,
   clamp,
+  COORD_LABEL,
   coordKey,
+  formatCoord,
 } from './grid';
 import { buildLetterGrid } from './letters';
-import { REDESIGN } from './ruleset';
+import { FREE_AIM, REDESIGN } from './ruleset';
 import type { Coord, MissReason, Round, ScanResult, ShotRejection } from './types';
 
 export interface EngineHandlers {
@@ -29,6 +31,10 @@ export interface EngineHandlers {
   onShotRejected: (rejection: ShotRejection) => void;
   /** Redesign rules: a grid cell was clicked (used for pencil marks). */
   onCellClick: (x: number, y: number) => void;
+  /** `?aim=free`: SPACE with nothing armed arms the cell under the reticle. */
+  onAimArm: (x: number, y: number) => void;
+  /** `?aim=free`: Esc on the grid clears the armed target. */
+  onDisarm: () => void;
   onFlakHit: () => void;
   onLinesDrawn: () => void;
   onGuideDrawn: () => void;
@@ -145,6 +151,11 @@ const RESPAWN_S = 3;
 const LOCKOUT_S = 2;
 /** Redesign rules: cooldown after a shot fired without LOCK is deflected. */
 export const DEFLECT_COOLDOWN_S = 1.5;
+/**
+ * `?aim=free`: fire presses are ignored this long after SPACE arms the aimed cell, so a quick
+ * double tap during sway can't arm a neighbor and fire at it in one go.
+ */
+const ARM_TO_FIRE_S = 0.3;
 /** Pointer travel (CSS px) under which a press on the grid counts as a click, not a drag. */
 const CLICK_SLOP_PX = 6;
 const LINE_DRAW_S = 1.4;
@@ -225,6 +236,7 @@ export class GameEngine {
   private flakEnabled = false;
   private lockoutUntil = 0;
   private lockoutLabel = 'WEAPONS OFFLINE';
+  private aimArmedAt = -Infinity;
   private shakeUntil = 0;
   private vignetteUntil = 0;
   private armed: Coord | null = null;
@@ -311,6 +323,7 @@ export class GameEngine {
     this.armedScan = null;
     this.rangeRow = 1;
     this.lockoutUntil = 0;
+    this.aimArmedAt = -Infinity;
     this.pendingClick = null;
     this.guide = null;
     this.finaleActive = false;
@@ -374,6 +387,26 @@ export class GameEngine {
     this.linesDone = true;
   }
 
+  /** True once constellation lines have started drawing (or were shown complete) this round. */
+  get linesShown() {
+    return this.linesStart !== null;
+  }
+
+  /**
+   * Makes every hit in `hits` ("x,y") a star, instantly and without the pop-in. Used when a saved
+   * game resumes; during play the engine has already lit each star, so this changes nothing.
+   */
+  syncStars(hits: string[]) {
+    for (const key of hits) {
+      const [x, y] = key.split(',').map(Number);
+      const cell = this.cellAt(x, y);
+      if (!cell || cell.state === 'star') continue;
+      cell.state = 'star';
+      cell.starAt = this.time - 1;
+    }
+    this.hitCount = Math.max(this.hitCount, hits.length);
+  }
+
   /** Screen shake + red vignette, used when shields are depleted. */
   alarm() {
     this.shakeUntil = this.time + 0.7;
@@ -397,6 +430,11 @@ export class GameEngine {
   private onKeyDown = (e: KeyboardEvent) => {
     if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    // Open dialogs switch grid input off, so the Esc that closes one never clears the target too.
+    if (k === 'Escape' && FREE_AIM && this.inputEnabled && this.armed && !this.finaleActive) {
+      this.handlers.onDisarm();
+      return;
+    }
     const gameKeys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'a', 'd', 'w', 's', ' '];
     if (!gameKeys.includes(k)) return;
     e.preventDefault();
@@ -499,10 +537,18 @@ export class GameEngine {
     const y = CANNON_Y - 30;
     if (REDESIGN && !this.finaleActive) {
       if (!this.armed) {
-        this.handlers.onFireBlocked();
-        this.handlers.onShotRejected({ kind: 'no-target' });
+        const aim = FREE_AIM ? this.aimCell() : null;
+        if (!aim) {
+          this.handlers.onFireBlocked();
+          this.handlers.onShotRejected({ kind: 'no-target' });
+          return;
+        }
+        // Free aim: this press commits the cell under the reticle; the next one fires at it.
+        this.aimArmedAt = this.time;
+        this.handlers.onAimArm(aim[0], aim[1]);
         return;
       }
+      if (this.time - this.aimArmedAt < ARM_TO_FIRE_S) return;
       // Lock is judged now, when SPACE is pressed; the bullet then rides the sway to that cell.
       this.bullet = {
         x: this.cannonX,
@@ -821,10 +867,12 @@ export class GameEngine {
     ctx.font = `16px ${FONT}`;
     ctx.fillStyle = '#8ea0bf';
     ctx.textAlign = 'left';
-    ctx.fillText('X', GRID_RIGHT + 18, GRID_BOTTOM + 34);
-    this.arrow(GRID_RIGHT + 42, GRID_BOTTOM + 34, 'right');
+    // Redesign names the axes the way players type them: ROW first, then COL.
+    const colAxis = REDESIGN ? 'COL' : 'X';
+    ctx.fillText(colAxis, GRID_RIGHT + 18, GRID_BOTTOM + 34);
+    this.arrow(GRID_RIGHT + 26 + colAxis.length * 16, GRID_BOTTOM + 34, 'right');
     ctx.textAlign = 'center';
-    ctx.fillText('Y', GRID_LEFT - 40, GRID_TOP - 34);
+    ctx.fillText(REDESIGN ? 'ROW' : 'Y', GRID_LEFT - 40, GRID_TOP - 34);
     this.arrow(GRID_LEFT - 40, GRID_TOP - 12, 'up');
   }
 
@@ -936,9 +984,20 @@ export class GameEngine {
     ctx.font = `18px ${FONT}`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('AIM', GRID_RIGHT + 14, y - 14);
-    ctx.fillText(col === null ? `-,${this.rangeRow}` : `${col},${this.rangeRow}`, GRID_RIGHT + 14, y + 12);
-    if (locked) ctx.fillText('LOCK', GRID_RIGHT + 14, y + 38);
+    const aim = col === null ? (REDESIGN ? `${this.rangeRow},-` : `-,${this.rangeRow}`) : formatCoord(col, this.rangeRow);
+    if (REDESIGN) {
+      // Same order as the ARM TARGET box, with a caption so nobody has to guess which number is which.
+      ctx.fillText('AIM', GRID_RIGHT + 14, y - 26);
+      ctx.font = `11px ${FONT}`;
+      ctx.fillText(COORD_LABEL, GRID_RIGHT + 14, y - 6);
+      ctx.font = `18px ${FONT}`;
+      ctx.fillText(aim, GRID_RIGHT + 14, y + 14);
+      if (locked) ctx.fillText('LOCK', GRID_RIGHT + 14, y + 40);
+    } else {
+      ctx.fillText('AIM', GRID_RIGHT + 14, y - 14);
+      ctx.fillText(aim, GRID_RIGHT + 14, y + 12);
+      if (locked) ctx.fillText('LOCK', GRID_RIGHT + 14, y + 38);
+    }
   }
 
   private renderLines() {
@@ -1249,19 +1308,26 @@ export class GameEngine {
   private drawLegend() {
     const { ctx } = this;
     const { text, color } = this.coachLine();
-    // The redesign's instructions run longer, so they use a smaller size centered on the grid, clear of the Y axis label.
-    ctx.font = `${REDESIGN ? 16 : 18}px ${FONT}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = color;
-    // Redesign: the line rides the sway with the grid so it never collides with the Y axis label.
-    ctx.fillText(text, REDESIGN ? (GRID_LEFT + GRID_RIGHT) / 2 + this.drift : W / 2, 24);
+    if (!REDESIGN) {
+      ctx.font = `18px ${FONT}`;
+      ctx.fillText(text, W / 2, 24);
+      return;
+    }
+    // Centered on the grid and riding its sway, like the ROW axis label beside it. The width cap
+    // squeezes a long line rather than letting it run into that label.
+    const center = (GRID_LEFT + GRID_RIGHT) / 2;
+    const rowLabelRight = GRID_LEFT - 40 + 24;
+    ctx.font = `16px ${FONT}`;
+    ctx.fillText(text, center + this.drift, 24, 2 * (center - rowLabelRight - 12));
   }
 
   /** The line above the grid. Under the redesign it always names the next thing to do. */
   private coachLine(): { text: string; color: string } {
     const guideTip = this.guideAvailable && !this.guide;
-    const yHint = { text: 'Y = 1 IS THE BOTTOM ROW', color: '#ffd166' };
+    const yHint = { text: REDESIGN ? 'ROW 1 IS THE BOTTOM ROW' : 'Y = 1 IS THE BOTTOM ROW', color: '#ffd166' };
     const guide = { text: 'DRAG FROM A STAR TO LAY A GUIDE LINE', color: GUIDE_COLOR };
     if (!REDESIGN) return guideTip ? guide : yHint;
     if (!this.inputEnabled || this.banner) return yHint;
@@ -1270,17 +1336,27 @@ export class GameEngine {
       return { text, color: '#ff5c5c' };
     }
     if (!this.armed) {
-      return guideTip ? guide : { text: 'TYPE X,Y IN ARM TARGET. Y = 1 IS THE BOTTOM ROW', color: '#ffd166' };
+      if (guideTip) return guide;
+      if (FREE_AIM) {
+        const aim = this.aimCell();
+        const text = aim
+          ? `PRESS SPACE TO ARM (${formatCoord(aim[0], aim[1])}), OR TYPE ${COORD_LABEL}`
+          : `AIM AT A CELL, OR TYPE ${COORD_LABEL} IN ARM TARGET`;
+        return { text, color: '#ffd166' };
+      }
+      return { text: `TYPE ${COORD_LABEL} IN ARM TARGET · ROW 1 = BOTTOM`, color: '#ffd166' };
     }
     const [ax, ay] = this.armed;
-    if (this.isLocked()) return { text: `LOCKED ON (${ax},${ay}). PRESS SPACE`, color: '#35f0ff' };
+    if (this.isLocked()) {
+      const clear = FREE_AIM ? ' · ESC TO CLEAR' : '';
+      return { text: `LOCKED ON (${formatCoord(ax, ay)}). PRESS SPACE${clear}`, color: '#35f0ff' };
+    }
+    // Row first, matching the order players type.
     const steps: string[] = [];
+    if (this.rangeRow !== ay) steps.push(`SET ROW ${ay > this.rangeRow ? 'UP' : 'DOWN'} TO ${ay}`);
     if (this.columnAt(this.cannonX) !== ax) {
       const side = cellCenterX(ax) + this.drift < this.cannonX ? 'LEFT' : 'RIGHT';
       steps.push(`MOVE ${side} TO COLUMN ${ax}`);
-    }
-    if (this.rangeRow !== ay) {
-      steps.push(`${steps.length ? 'ROW' : 'SET ROW'} ${ay > this.rangeRow ? 'UP' : 'DOWN'} TO ${ay}`);
     }
     return { text: steps.join(' · '), color: '#ffb347' };
   }

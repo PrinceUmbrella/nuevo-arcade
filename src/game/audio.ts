@@ -78,6 +78,12 @@ class SoundBoard {
     this.tone(90, 0, 0.4, { type: 'sine', gain: 0.35, endFreq: 40 });
   }
 
+  /** Free aim: a short two-note blip when SPACE arms the aimed cell. */
+  arm() {
+    this.tone(880, 0, 0.06, { type: 'square', gain: 0.07 });
+    this.tone(1320, 0.07, 0.08, { type: 'square', gain: 0.07 });
+  }
+
   denied() {
     this.tone(180, 0, 0.12, { type: 'square', gain: 0.1 });
     this.tone(140, 0.13, 0.18, { type: 'square', gain: 0.1 });

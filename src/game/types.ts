@@ -47,6 +47,8 @@ export interface Round {
   /** Pairs of indices into `targets`, drawn in order when the round is won. */
   lines: [number, number][];
   clues: ClueSection[];
+  /** Original clue text (column first), used only with ?rules=classic. Falls back to `clues`. */
+  classicClues?: ClueSection[];
   cipher?: Cipher;
   /** Red-herring cells that show a specific letter. Hitting one is a miss. */
   decoys?: Decoy[];

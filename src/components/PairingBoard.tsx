@@ -1,4 +1,5 @@
 import { useRef, useState, type DragEvent } from 'react';
+import { formatCoord } from '../game/grid';
 import { REDESIGN } from '../game/ruleset';
 import type { BoardState } from '../game/state';
 import type { PairingBoard as BoardConfig } from '../game/types';
@@ -54,6 +55,12 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
     const q = points[i + 1];
     return p && q ? [[toMap(p.x, p.y), toMap(q.x, q.y)] as const] : [];
   });
+
+  // Redesign: W positions run left to right, so the column numbers must climb. Flags a mirrored or
+  // shuffled W without saying which card is the interference.
+  const colNumbers = state.colSlots.map((c) => Number(valueOf('col', c)));
+  const colsNumbered = colNumbers.every((v) => v >= 1 && v <= 8);
+  const colsOutOfOrder = REDESIGN && colsNumbered && colNumbers.some((v, i) => i > 0 && v <= colNumbers[i - 1]);
 
   const unusedCols = config.columnCards.map((_, c) => c).filter((c) => slotOf('col', c) === -1);
   const allColsPlaced = state.colSlots.every((c) => c !== null);
@@ -145,16 +152,35 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
             <h3>W POSITIONS, LEFT TO RIGHT</h3>
             <ol className="slots">
               {Array.from({ length: config.slots }, (_, i) => (
-                <li key={i} className="slot">
+                <li key={i} className={REDESIGN ? 'slot with-coord' : 'slot'}>
                   <span className="slot-num">{i + 1}</span>
                   {renderZone('col', i)}
                   {renderZone('row', i)}
+                  {REDESIGN && <SlotCoord point={points[i]} />}
                 </li>
               ))}
             </ol>
 
-            <h3>PREVIEW</h3>
-            <svg className="mini-map" viewBox={`-2 -2 ${MAP_SIZE + 4} ${MAP_SIZE + 4}`} role="img" aria-label="Preview of your pairs">
+            <h3>
+              PREVIEW{REDESIGN && <small className="preview-axes">ROW ↑ · COL →</small>}
+            </h3>
+            <svg
+              className="mini-map"
+              viewBox={REDESIGN ? `-30 -2 ${MAP_SIZE + 32} ${MAP_SIZE + 32}` : `-2 -2 ${MAP_SIZE + 4} ${MAP_SIZE + 4}`}
+              role="img"
+              aria-label="Preview of your pairs"
+            >
+              {REDESIGN &&
+                Array.from({ length: 8 }, (_, i) => (
+                  <g key={`axis${i}`} className="mini-axis">
+                    <text x={-14} y={MAP_SIZE - (i + 0.5) * MAP_CELL + 5}>
+                      {i + 1}
+                    </text>
+                    <text x={(i + 0.5) * MAP_CELL} y={MAP_SIZE + 22}>
+                      {i + 1}
+                    </text>
+                  </g>
+                ))}
               {Array.from({ length: 9 }, (_, i) => (
                 <g key={i}>
                   <line x1={i * MAP_CELL} y1={0} x2={i * MAP_CELL} y2={MAP_SIZE} />
@@ -162,7 +188,7 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
                 </g>
               ))}
               {segments.map(([[x1, y1], [x2, y2]], i) => (
-                <line key={`s${i}`} className="mini-seg" x1={x1} y1={y1} x2={x2} y2={y2} />
+                <line key={`s${i}`} className={colsOutOfOrder ? 'mini-seg bad' : 'mini-seg'} x1={x1} y1={y1} x2={x2} y2={y2} />
               ))}
               {points.map((p) => {
                 if (!p) return null;
@@ -177,14 +203,26 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
                 );
               })}
             </svg>
-            <p className="pairing-foot">
-              {allColsPlaced
-                ? `Left over: ${unusedCols.map((c) => label('col', c)).join(', ')}. Is that the interference?`
-                : 'The preview plots the numbers you wrote. It cannot tell you if they are right.'}
+            <p className={colsOutOfOrder ? 'pairing-foot warn' : 'pairing-foot'} aria-live="polite">
+              {colsOutOfOrder
+                ? 'Columns should go up from position 1 (left) to position 5 (right).'
+                : allColsPlaced
+                  ? `Left over: ${unusedCols.map((c) => label('col', c)).join(', ')}. Is that the interference?`
+                  : 'The preview plots the numbers you wrote. It cannot tell you if they are right.'}
             </p>
           </section>
         </div>
       </div>
     </div>
+  );
+}
+
+/** Redesign: the coordinate a W position becomes, in the same order the ARM TARGET box expects. */
+function SlotCoord({ point }: { point: { x: number; y: number } | null }) {
+  const coord = point ? formatCoord(point.x, point.y) : null;
+  return (
+    <span className={coord ? 'slot-coord ready' : 'slot-coord'} aria-label={coord ? `Type ${coord}` : 'Not ready yet'}>
+      → {coord ?? '–'}
+    </span>
   );
 }

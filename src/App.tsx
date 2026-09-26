@@ -22,7 +22,9 @@ import {
   nextHintLocked,
   sectorLabel,
 } from './game/state';
-import { REDESIGN } from './game/ruleset';
+import { COORD_LABEL } from './game/grid';
+import { FREE_AIM, REDESIGN } from './game/ruleset';
+import { clearSave, loadSave, writeSave, type SavedGame } from './game/save';
 import type { Coord, Phase } from './game/types';
 import { useNow } from './hooks/useNow';
 import { useStageScale } from './hooks/useStageScale';
@@ -34,12 +36,15 @@ import { ConstellationDetected } from './components/ConstellationDetected';
 import { ControlsLegend } from './components/ControlsLegend';
 import { Lobby } from './components/Lobby';
 import { PairingBoard } from './components/PairingBoard';
+import { ResumePrompt } from './components/ResumePrompt';
 import { TargetingMatrix } from './components/TargetingMatrix';
 import { TopBar } from './components/TopBar';
 import { VictoryScreen } from './components/VictoryScreen';
 import { SpaceBackground } from './components/three/SpaceBackground';
 
 const VAULT_HOLD_MS = 1600;
+/** Phases that come after the constellation lines finish drawing. */
+const LINES_DONE_PHASES: Phase[] = ['identify', 'reveal', 'finale', 'vault', 'victory'];
 const FAILED_HOLD_MS = 3000;
 
 const BANNERS: Partial<Record<Phase, string>> = {
@@ -57,6 +62,8 @@ export default function App() {
   const [showLegend, setShowLegend] = useState(false);
   const [showNavClues, setShowNavClues] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  // Redesign: a game saved before a refresh, waiting for the crew to continue or start over.
+  const [resume, setResume] = useState<SavedGame | null>(loadSave);
   const [entries, setEntries] = useState<LeaderboardEntry[]>(loadLeaderboard);
   const [result, setResult] = useState<{ rank: number; entry: LeaderboardEntry } | null>(null);
   const recordedRun = useRef<number | null>(null);
@@ -83,6 +90,11 @@ export default function App() {
         dispatch({ type: 'SHOT_REJECTED', rejection });
       },
       onCellClick: (x, y) => dispatch({ type: 'TOGGLE_MARK', x, y }),
+      onAimArm: (x, y) => {
+        sound.arm();
+        dispatch({ type: 'ARM', coord: [x, y] });
+      },
+      onDisarm: () => dispatch({ type: 'ARM', coord: null }),
       onFlakHit: () => {
         sound.impact();
         dispatch({ type: 'FLAK_HIT' });
@@ -105,6 +117,22 @@ export default function App() {
   useEffect(() => {
     engine?.loadRound(ROUNDS[roundIndex]);
   }, [engine, epoch, roundIndex]);
+
+  // Restored games bring their stars back instantly; during play this is a no-op.
+  useEffect(() => {
+    engine?.syncStars(state.hits);
+  }, [engine, epoch, state.hits]);
+
+  useEffect(() => {
+    if (REDESIGN && engine && LINES_DONE_PHASES.includes(phase) && !engine.linesShown) engine.showLinesComplete();
+  }, [engine, phase, epoch]);
+
+  // Redesign: keep the latest progress in this browser. Back in the lobby there's nothing to keep.
+  useEffect(() => {
+    if (!REDESIGN || resume) return;
+    if (state.phase === 'lobby') clearSave();
+    else writeSave(state);
+  }, [state, resume]);
 
   const modalOpen = (boardOpen && !!round.board && phase === 'playing') || showLegend;
   useEffect(() => {
@@ -249,6 +277,24 @@ export default function App() {
   }, []);
 
   // ---- UI callbacks
+  const onContinue = useCallback(() => {
+    if (!resume) return;
+    sound.unlock();
+    sound.chime();
+    dispatch({ type: 'RESTORE', state: resume.state });
+    setResume(null);
+  }, [resume]);
+
+  const onFinalSolved = useCallback(() => {
+    sound.fanfare();
+    dispatch({ type: 'FINAL_SOLVED' });
+  }, []);
+
+  const onStartOver = useCallback(() => {
+    clearSave();
+    setResume(null);
+  }, []);
+
   const onBegin = useCallback((team: string) => {
     sound.unlock();
     sound.chime();
@@ -261,7 +307,7 @@ export default function App() {
 
   const onInvalidCoord = useCallback((text: string) => {
     sound.denied();
-    dispatch({ type: 'LOG', text: `INVALID COORDINATE "${text.trim()}". USE X,Y WITH VALUES 1-8`, tone: 'error' });
+    dispatch({ type: 'LOG', text: `INVALID COORDINATE "${text.trim()}". USE ${COORD_LABEL} WITH VALUES 1-8`, tone: 'error' });
   }, []);
 
   const onRequestHint = useCallback(() => dispatch({ type: 'REQUEST_HINT', now: Date.now() }), []);
@@ -360,6 +406,7 @@ export default function App() {
                   </span>
                 )}
                 {!REDESIGN && <span className="staff-flag">CLASSIC RULES</span>}
+                {FREE_AIM && <span className="staff-flag">FREE AIM</span>}
                 {showTargets && <span className="staff-flag">STAFF OVERLAY</span>}
                 {showNavClues && round.navigatorOnly && <span className="staff-flag">NAV CLUES ON SCREEN</span>}
               </div>
@@ -403,7 +450,12 @@ export default function App() {
                 onClose={() => setBoardOpen(false)}
               />
             )}
-            {phase === 'lobby' && <Lobby entries={entries} onStart={onBegin} />}
+            {phase === 'lobby' &&
+              (resume ? (
+                <ResumePrompt save={resume} onContinue={onContinue} onStartOver={onStartOver} />
+              ) : (
+                <Lobby entries={entries} onStart={onBegin} />
+              ))}
             {phase === 'victory' && (
               <VictoryScreen
                 team={state.team}
@@ -414,6 +466,8 @@ export default function App() {
                 rank={result?.rank ?? null}
                 entries={entries}
                 mine={result?.entry ?? null}
+                finalSolved={state.finalSolved}
+                onFinalSolved={onFinalSolved}
               />
             )}
           </div>
