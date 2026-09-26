@@ -753,7 +753,8 @@ export class GameEngine {
       return;
     }
     const key = coordKey(x, y);
-    const expected = this.round?.requireOrder ? this.round.targets[this.hitCount] : null;
+    // Classic rules enforce firing order; the redesign accepts beacons in any order.
+    const expected = !REDESIGN && this.round?.requireOrder ? this.round.targets[this.hitCount] : null;
     const inOrder = !expected || coordKey(expected[0], expected[1]) === key;
     if (this.targets.has(key) && inOrder) {
       cell.state = 'star';

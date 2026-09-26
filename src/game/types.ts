@@ -42,6 +42,8 @@ export interface Round {
   hiddenName: boolean;
   alienColor: string;
   missionText: string;
+  /** Original mission text, used only with ?rules=classic. Falls back to `missionText`. */
+  classicMissionText?: string;
   /** Beacon cells. With `requireOrder`, this is also the firing sequence. */
   targets: Coord[];
   /** Pairs of indices into `targets`, drawn in order when the round is won. */
@@ -52,7 +54,7 @@ export interface Round {
   cipher?: Cipher;
   /** Red-herring cells that show a specific letter. Hitting one is a miss. */
   decoys?: Decoy[];
-  /** Beacons must be hit in `targets` order; an out-of-sequence hit is a miss. */
+  /** Classic rules only: beacons must be hit in `targets` order; an out-of-sequence hit is a miss. */
   requireOrder?: boolean;
   /** After the first star, players can drag a guide line from a star (visual only). */
   guideLine?: boolean;
@@ -74,7 +76,18 @@ export interface Round {
   keyFragment: string;
 }
 
-export type Phase = 'lobby' | 'playing' | 'failed' | 'drawing' | 'identify' | 'reveal' | 'finale' | 'vault' | 'victory';
+/** `complete` (redesign): a finished sector the crew has come back to look at. */
+export type Phase =
+  | 'lobby'
+  | 'playing'
+  | 'failed'
+  | 'drawing'
+  | 'identify'
+  | 'reveal'
+  | 'finale'
+  | 'vault'
+  | 'complete'
+  | 'victory';
 
 export type LogTone = 'info' | 'success' | 'error' | 'warn';
 

@@ -3,7 +3,7 @@ import { ROUNDS } from '../data/constellations';
 import { vigenere } from '../game/cipher';
 import { COORD_LABEL, formatCoord, parseCoord } from '../game/grid';
 import { FREE_AIM, REDESIGN } from '../game/ruleset';
-import { MAX_MARKS, roundClues, roundHints } from '../game/state';
+import { MAX_MARKS, roundClues, roundHints, roundMissionText } from '../game/state';
 import type { Coord, HintEntry, LogEntry, Phase, Round, ScanResult } from '../game/types';
 import { useTypewriter } from '../hooks/useTypewriter';
 
@@ -43,10 +43,10 @@ const VISIBLE_MESSAGES = 2;
 
 export function AstrometryLog(props: Props) {
   const { round, roundIndex, phase, hints, log, fragments, masterKey, decrypted } = props;
-  const mission = useTypewriter(round.missionText);
+  const mission = useTypewriter(roundMissionText(round));
   const hintsLeft = roundHints(round).length - hints.length;
   const canHint = hintsLeft > 0 && !props.hintLocked && (phase === 'playing' || phase === 'identify');
-  const identified = ['reveal', 'finale', 'vault', 'victory'].includes(phase);
+  const identified = ['reveal', 'finale', 'vault', 'complete', 'victory'].includes(phase);
   const sectorTitle = round.hiddenName && !identified ? 'CLASSIFIED' : round.name;
   const hintsRef = useRef<HTMLDivElement>(null);
   const encrypted = !!round.cipher && !decrypted;
@@ -99,10 +99,12 @@ export function AstrometryLog(props: Props) {
           <div className="navigator-notice">
             <div className="navigator-notice-title">BEACON CLUES ARE ON THE NAVIGATOR DEVICE</div>
             <p>
-              Your Navigator reads the beacons aloud. The Gunner stays at this screen and fires in sequence.
+              {REDESIGN
+                ? 'Your Navigator reads the beacons aloud. The Gunner stays at this screen and locks them in any order.'
+                : 'Your Navigator reads the beacons aloud. The Gunner stays at this screen and fires in sequence.'}
             </p>
             <p className="navigator-url">
-              Navigator link: <b>{window.location.host}/?view=navigator{REDESIGN ? '' : '&rules=classic'}</b>
+              Navigator link: <NavigatorLink />
             </p>
           </div>
         ) : (
@@ -248,6 +250,7 @@ function HowThisWorks({ letters }: { letters: number }) {
           Every star hides a letter, and these {letters} spell a word. SCAN checks a cell and shows its letter. Click
           cells to pencil-mark your ideas.
         </li>
+        <li>Stuck? Jump to another sector with the 1 2 3 buttons at the top. Each sector keeps its progress.</li>
       </ol>
     </section>
   );
@@ -414,7 +417,7 @@ function Vault({
       </div>
       <div className="vault-slots">
         {ROUNDS.map((r, i) => {
-          const open = fragments[i] !== undefined;
+          const open = !!fragments[i];
           const current = i === roundIndex && !open;
           return (
             <div key={r.keyFragment + i} className={`vault-slot ${open ? 'open' : ''} ${openingIndex === i ? 'opening' : ''}`}>
@@ -427,5 +430,23 @@ function Vault({
         })}
       </div>
     </section>
+  );
+}
+
+/** Opens the Navigator view in a new tab, keeping the rule set so both screens show the same clues. */
+export function NavigatorLink() {
+  const href = `/?view=navigator${REDESIGN ? '' : '&rules=classic'}`;
+  return (
+    <a
+      className="navigator-link"
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      // Keeps focus off the link so SPACE still fires after clicking it.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      {window.location.host}
+      {href}
+    </a>
   );
 }

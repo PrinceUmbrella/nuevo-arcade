@@ -11,7 +11,11 @@ export function DesktopOnlyNotice() {
           computer, or make this window larger.
         </p>
         <p className="desktop-only-nav">
-          Navigator? Your clues are at <b>{window.location.host}/?view=navigator</b>, which works on phones.
+          Navigator? Your clues are at{' '}
+          <a href="/?view=navigator" target="_blank" rel="noopener noreferrer">
+            {window.location.host}/?view=navigator
+          </a>
+          , which works on phones.
         </p>
       </div>
     </div>

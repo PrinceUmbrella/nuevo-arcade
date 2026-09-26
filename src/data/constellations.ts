@@ -10,7 +10,8 @@
  *  - alienColor         Any CSS color. Also tints the 3D nebula background.
  *  - targets            [X, Y] cells. X = column 1-8 LEFT to RIGHT,
  *                       Y = row 1-8 BOTTOM to TOP (Y = 1 is nearest the cannon).
- *                       With requireOrder: true this is also the firing order.
+ *                       With requireOrder: true this is also the firing order
+ *                       (classic rules only; the redesign accepts any order).
  *                       Cells are always stored column first like this, but
  *                       players type and read them ROW FIRST (row,col) in the
  *                       redesign. Write any coordinate inside clue or hint
@@ -27,7 +28,9 @@
  *  - classicClues       Optional. Original clue text for ?rules=classic.
  *  - decoys             Optional red-herring cells with their own letter.
  *                       Hitting one costs a shield like any miss.
- *  - requireOrder       Optional. Out-of-sequence hits cost a shield.
+ *  - requireOrder       Optional, classic rules only. Out-of-sequence hits
+ *                       cost a shield. The redesign ignores it.
+ *  - classicMissionText Optional. Original mission text for ?rules=classic.
  *  - guideLine          Optional. After the first star, players can drag a
  *                       guide line from a star on the grid (visual only).
  *  - board              Optional drag-and-drop pairing board: column and row
@@ -227,6 +230,8 @@ export const ROUNDS: Round[] = [
     hiddenName: true,
     alienColor: '#ffcc33',
     missionText:
+      'Sector 3 firewall active. Identity CLASSIFIED. Seven beacons, and you can lock them in any order. Once the pattern forms, identify it.',
+    classicMissionText:
       'FINAL FIREWALL. Sector identity CLASSIFIED. Seven beacons, listed in FIRING SEQUENCE. Out-of-sequence shots will be rejected. Once the pattern forms, identify it.',
     targets: [
       [1, 7],
@@ -253,7 +258,7 @@ export const ROUNDS: Round[] = [
     decoys: [{ cell: [8, 7], letter: 'Q' }],
     clues: [
       {
-        heading: 'BEACONS, IN FIRING SEQUENCE',
+        heading: 'BEACONS',
         ordered: true,
         items: [
           'Row = number of colors in a rainbow. Column = number of moons Earth has.',

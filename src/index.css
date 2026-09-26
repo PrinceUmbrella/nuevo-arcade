@@ -1062,8 +1062,18 @@ h3 {
   color: var(--amber);
 }
 
-.navigator-url b {
+.navigator-url b,
+.navigator-link {
   color: var(--cyan);
+}
+
+.navigator-link {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.navigator-link:hover {
+  color: #fff;
 }
 
 .board-launch {
@@ -1124,6 +1134,7 @@ h3 {
 }
 
 .pairing {
+  position: relative;
   width: 1840px;
   max-height: 1010px;
   display: flex;
@@ -1403,6 +1414,377 @@ h3 {
   color: var(--amber);
 }
 
+/* Redesign: the board's three steps, a help button, a live dot count, and the help window. */
+.pairing-head.with-help {
+  grid-template-columns: auto 1fr auto auto;
+  gap: 20px;
+}
+
+.board-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: 24px;
+  color: #cfd8e8;
+}
+
+.board-steps li {
+  counter-increment: step;
+}
+
+.board-steps li::before {
+  content: counter(step);
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 8px;
+  font-family: var(--pixel);
+  font-size: 13px;
+  color: var(--green-ink);
+  background: var(--amber);
+}
+
+.pairing-help-btn {
+  padding: 14px 18px;
+  font-family: var(--pixel);
+  font-size: 16px;
+  color: var(--amber);
+  background: transparent;
+  border: 2px solid var(--amber);
+  cursor: pointer;
+}
+
+.pairing-help-btn:hover {
+  background: rgba(255, 209, 102, 0.12);
+}
+
+.preview-status {
+  margin: -4px 0 8px;
+  font-size: 22px;
+  line-height: 1.15;
+  color: var(--slate);
+  text-align: center;
+}
+
+.preview-status.ready {
+  color: var(--green);
+}
+
+.board-help {
+  position: absolute;
+  inset: 40px 120px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 32px 40px;
+  background: #030a10;
+  border: 3px solid var(--amber);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.7);
+}
+
+.board-help h2 {
+  font-family: var(--pixel);
+  font-size: 26px;
+  color: var(--amber);
+}
+
+.board-help-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 640px;
+  gap: 32px;
+}
+
+.board-help-steps {
+  margin: 0;
+  padding-left: 1.6em;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  font-size: 26px;
+  line-height: 1.2;
+  color: #e6edf7;
+}
+
+.board-help-steps li::marker {
+  color: var(--amber);
+}
+
+.board-help-example {
+  align-self: start;
+  margin: 0;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 2px dashed #3d5a6b;
+  font-size: 24px;
+  color: #cfd8e8;
+}
+
+.board-help-example figcaption {
+  font-family: var(--pixel);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--slate);
+}
+
+.board-help-example p {
+  margin: 0;
+}
+
+.board-help-example b {
+  color: var(--green);
+}
+
+/* Animated walkthrough in the help window (made-up cards). */
+.demo {
+  display: grid;
+  gap: 14px;
+}
+
+.demo-streams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.demo-streams ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.demo-card {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 23px;
+  line-height: 1.05;
+  color: #cfd8e8;
+  border: 2px solid #2a4150;
+  transition:
+    border-color 0.25s,
+    box-shadow 0.25s,
+    opacity 0.4s;
+}
+
+.demo-card.selected {
+  border-color: var(--amber);
+  box-shadow: 0 0 14px rgba(255, 209, 102, 0.55);
+}
+
+.demo-card.placed {
+  opacity: 0.4;
+}
+
+.demo-label {
+  font-family: var(--pixel);
+  font-size: 13px;
+}
+
+.demo-card.col .demo-label {
+  color: var(--cyan);
+}
+
+.demo-card.row .demo-label {
+  color: #c49bff;
+}
+
+.demo-value {
+  min-width: 3ch;
+  color: var(--slate);
+}
+
+.demo-value.written {
+  color: var(--green);
+  animation: demo-type 0.35s steps(2, end);
+}
+
+.demo-lower {
+  display: grid;
+  grid-template-columns: 1fr 236px;
+  align-items: center;
+  gap: 14px;
+}
+
+.demo-slots {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.demo-slot {
+  display: grid;
+  grid-template-columns: 24px 1fr 1fr 76px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px;
+  border: 2px solid transparent;
+}
+
+.demo-slot.current {
+  border-color: rgba(255, 209, 102, 0.45);
+}
+
+.demo-slot-num {
+  font-family: var(--pixel);
+  font-size: 14px;
+  color: var(--amber);
+}
+
+.demo-zone {
+  height: 42px;
+  display: grid;
+  place-items: center;
+  font-family: var(--pixel);
+  font-size: 13px;
+  color: var(--slate);
+  border: 2px dashed #3d5a6b;
+}
+
+.demo-zone.filled {
+  border-style: solid;
+  color: #fff;
+  animation: demo-drop 0.35s ease-out;
+}
+
+.demo-zone.col.filled {
+  border-color: var(--cyan);
+  background: rgba(53, 240, 255, 0.08);
+}
+
+.demo-zone.row.filled {
+  border-color: #c49bff;
+  background: rgba(196, 155, 255, 0.08);
+}
+
+.demo-coord {
+  font-family: var(--pixel);
+  font-size: 14px;
+  color: var(--slate);
+  white-space: nowrap;
+}
+
+.demo-coord.ready {
+  color: var(--green);
+}
+
+.demo-map {
+  width: 236px;
+}
+
+.demo-grid line {
+  stroke: rgba(170, 180, 200, 0.25);
+  stroke-width: 1;
+}
+
+.demo-seg {
+  stroke: var(--cyan);
+  stroke-width: 3;
+  animation: demo-draw 0.9s ease-out forwards;
+}
+
+.demo-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: demo-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.demo-caption {
+  margin: 0;
+  min-height: 2.4em;
+  font-size: 26px;
+  line-height: 1.2;
+  color: #fff4c2;
+}
+
+.demo-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.demo-note {
+  font-size: 21px;
+  color: var(--slate);
+}
+
+.demo-toggle {
+  flex: none;
+  padding: 8px 12px;
+  font-family: var(--pixel);
+  font-size: 12px;
+  color: var(--amber);
+  background: transparent;
+  border: 2px solid var(--amber);
+  cursor: pointer;
+}
+
+@keyframes demo-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes demo-pop {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes demo-drop {
+  from {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+
+@keyframes demo-type {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .demo-card,
+  .demo-value.written,
+  .demo-zone.filled,
+  .demo-seg,
+  .demo-dot {
+    animation: none;
+    transition: none;
+  }
+}
+
+.board-help > .pairing-close {
+  align-self: flex-end;
+}
+
 /* ---------------------------------------------------------------- second-screen pages */
 
 html.page-view,
@@ -1544,6 +1926,62 @@ html.page-view #root {
   display: contents;
 }
 
+/* Redesign: sector buttons so crews can jump between sectors. */
+.sector-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.sector-tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.sector-tab {
+  min-width: 46px;
+  height: 34px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-family: var(--pixel);
+  font-size: 15px;
+  color: var(--slate);
+  background: transparent;
+  border: 2px solid #3d5a6b;
+  cursor: pointer;
+}
+
+.sector-tab:hover:not(:disabled) {
+  color: #fff;
+  border-color: var(--cyan);
+}
+
+.sector-tab.started {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.sector-tab.done {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.sector-tab.current {
+  color: var(--green-ink);
+  background: var(--cyan);
+  border-color: var(--cyan);
+  cursor: default;
+}
+
+.sector-tab:disabled:not(.current) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Redesign: no mission timer, so the sector name takes the freed space. */
 .topbar.no-timer {
   grid-template-columns: 1.8fr 0.8fr 1fr;
@@ -1627,7 +2065,8 @@ html.page-view #root {
   color: var(--slate);
 }
 
-.desktop-only-nav b {
+.desktop-only-nav b,
+.desktop-only-nav a {
   color: var(--cyan);
   overflow-wrap: anywhere;
 }

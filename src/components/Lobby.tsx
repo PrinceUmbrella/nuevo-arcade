@@ -49,7 +49,7 @@ export function Lobby({ entries, onStart }: { entries: LeaderboardEntry[]; onSta
         </form>
         <p className="lobby-note">
           {REDESIGN
-            ? "There's no clock, so take your time. Hints are free. Wrong answers cost a shield."
+            ? "There's no clock, so take your time. Play the three sectors in any order. Hints are free. Wrong answers cost a shield."
             : 'The mission clock starts when you press Start. Requested hints add 1:00.'}
         </p>
       </div>

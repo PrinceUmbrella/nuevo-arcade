@@ -43,6 +43,20 @@ export interface BoardState {
   rowValues: string[];
 }
 
+/** One sector's progress, kept while the crew works on a different sector (redesign). */
+export interface SectorProgress {
+  phase: Phase;
+  hits: string[];
+  wrongHits: number;
+  hints: HintEntry[];
+  decrypted: boolean;
+  scansUsed: number;
+  scanned: string[];
+  board: BoardState | null;
+  marks: string[];
+  sectorMissed: boolean;
+}
+
 export interface GameState {
   team: string;
   roundIndex: number;
@@ -71,6 +85,11 @@ export interface GameState {
   sectorMissed: boolean;
   /** Redesign: the crew answered the look-up question on the victory screen. */
   finalSolved: boolean;
+  /**
+   * Redesign: progress in each sector, so crews can jump between sectors without losing work.
+   * The active sector lives in the top-level fields; this slot is refreshed whenever they leave it.
+   */
+  sectors: (SectorProgress | null)[];
   log: LogEntry[];
   nextLogId: number;
 }
@@ -101,18 +120,56 @@ export type GameAction =
   | { type: 'SKIP'; now: number }
   | { type: 'RESTORE'; state: GameState }
   | { type: 'FINAL_SOLVED' }
+  | { type: 'GOTO_SECTOR'; index: number }
   | { type: 'RESET' };
 
 export const currentRound = (s: GameState): Round => ROUNDS[s.roundIndex];
 export const isLastRound = (s: GameState) => s.roundIndex === ROUNDS.length - 1;
-export const masterKey = (s: GameState) => s.fragments.join(MASTER_KEY_SEPARATOR);
 export const fullMasterKey = () => ROUNDS.map((r) => r.keyFragment).join(MASTER_KEY_SEPARATOR);
+
+/** Classic rules only: beacons must be shot in `targets` order. The redesign accepts any order. */
+export const inSequence = (round: Round) => !REDESIGN && !!round.requireOrder;
+export const roundMissionText = (round: Round) =>
+  REDESIGN ? round.missionText : (round.classicMissionText ?? round.missionText);
+
+export const hasFragment = (s: GameState, index: number) => !!s.fragments[index];
+export const allFragments = (s: GameState) => ROUNDS.every((_, i) => hasFragment(s, i));
+
+/** Classic joins fragments in play order. The redesign can finish sectors out of order, so gaps show as ?s. */
+export const masterKey = (s: GameState) => {
+  if (!REDESIGN) return s.fragments.join(MASTER_KEY_SEPARATOR);
+  if (!s.fragments.some(Boolean)) return '';
+  return ROUNDS.map((r, i) => s.fragments[i] || '?'.repeat(r.keyFragment.length)).join(MASTER_KEY_SEPARATOR);
+};
+
+/** Phases after which a hidden sector's real name may be shown. */
+const IDENTIFIED_PHASES: Phase[] = ['reveal', 'finale', 'vault', 'complete', 'victory'];
 
 export const sectorLabel = (s: GameState) => {
   const r = currentRound(s);
-  const identified = ['reveal', 'finale', 'vault', 'victory'].includes(s.phase);
+  const identified = IDENTIFIED_PHASES.includes(s.phase);
   return r.hiddenName && !identified ? 'UNKNOWN SECTOR' : r.name;
 };
+
+/** Redesign: phases a crew can leave mid-sector. Short animations and the shield reboot can't be interrupted. */
+const SWITCHABLE_PHASES: Phase[] = ['playing', 'identify', 'finale', 'complete'];
+export const canSwitchSector = (s: GameState) => REDESIGN && SWITCHABLE_PHASES.includes(s.phase);
+
+export type SectorStatus = 'current' | 'complete' | 'started' | 'new';
+
+/** Redesign: what the sector buttons show for sector `index`. */
+export function sectorTab(s: GameState, index: number): { name: string; status: SectorStatus; done: boolean } {
+  const round = ROUNDS[index];
+  const saved = s.sectors[index];
+  const done = hasFragment(s, index);
+  if (index === s.roundIndex) return { name: sectorLabel(s), status: 'current', done };
+  const identified = done || (!!saved && IDENTIFIED_PHASES.includes(saved.phase));
+  return {
+    name: round.hiddenName && !identified ? 'UNKNOWN SECTOR' : round.name,
+    status: done ? 'complete' : saved ? 'started' : 'new',
+    done,
+  };
+}
 
 const normalizeName = (v: string) =>
   v
@@ -175,7 +232,7 @@ function startRound(s: GameState, index: number): GameState {
     marks: [],
     sectorMissed: false,
   };
-  const order = r.requireOrder ? ' IN SEQUENCE' : '';
+  const order = inSequence(r) ? ' IN SEQUENCE' : '';
   return log(next, `SECTOR ${index + 1} LINK ESTABLISHED. ${r.targets.length} BEACONS TO LOCK${order}`, 'info');
 }
 
@@ -202,6 +259,7 @@ export function createInitialState(epoch = 0): GameState {
     marks: [],
     sectorMissed: false,
     finalSolved: false,
+    sectors: ROUNDS.map(() => null),
     log: [],
     nextLogId: 1,
   };
@@ -214,10 +272,42 @@ function toReveal(s: GameState, now: number): GameState {
 }
 
 function withFragment(s: GameState): GameState {
-  if (s.fragments.length > s.roundIndex) return s;
-  const fragments = [...s.fragments];
+  if (hasFragment(s, s.roundIndex)) return s;
+  // Redesign sectors can finish in any order, so keep one slot per sector ('' until earned).
+  const fragments = REDESIGN ? ROUNDS.map((_, i) => s.fragments[i] || '') : [...s.fragments];
   fragments[s.roundIndex] = currentRound(s).keyFragment;
   return { ...s, fragments };
+}
+
+function snapshot(s: GameState, phase: Phase = s.phase): SectorProgress {
+  const { hits, wrongHits, hints, decrypted, scansUsed, scanned, board, marks, sectorMissed } = s;
+  return { phase, hits, wrongHits, hints, decrypted, scansUsed, scanned, board, marks, sectorMissed };
+}
+
+/** Redesign: store the current sector's progress (as `leavingPhase`) and open sector `index` where the crew left it. */
+function enterSector(s: GameState, index: number, leavingPhase: Phase = s.phase): GameState {
+  const sectors = [...s.sectors];
+  sectors[s.roundIndex] = snapshot(s, leavingPhase);
+  const saved = sectors[index];
+  if (!saved) return startRound({ ...s, sectors }, index);
+  const round = ROUNDS[index];
+  const next: GameState = { ...s, ...saved, sectors, roundIndex: index, epoch: s.epoch + 1, armed: null, armedScan: null };
+  if (saved.phase === 'complete') return log(next, `SECTOR ${index + 1} COMPLETE. KEY FRAGMENT ${round.keyFragment}`, 'success');
+  if (saved.phase === 'identify') return log(next, `SECTOR ${index + 1} LINK RESTORED. NAME THE CONSTELLATION IN THE LOG`, 'warn');
+  if (saved.phase === 'finale' && round.finale) {
+    return log(next, `SECTOR ${index + 1} LINK RESTORED. SHOOT ${round.finale.label} OVER COLUMN ${round.finale.column}`, 'warn');
+  }
+  const left = round.targets.length - saved.hits.length;
+  return log(next, `SECTOR ${index + 1} LINK RESTORED. ${left} OF ${round.targets.length} BEACONS LEFT`, 'info');
+}
+
+/** Redesign: the next sector without a key fragment, starting after the current one. */
+function nextUnfinished(s: GameState): number | null {
+  for (let step = 1; step <= ROUNDS.length; step++) {
+    const i = (s.roundIndex + step) % ROUNDS.length;
+    if (!hasFragment(s, i)) return i;
+  }
+  return null;
 }
 
 function openVault(s: GameState): GameState {
@@ -281,12 +371,12 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       const key = coordKey(a.x, a.y);
       const isTarget = round.targets.some(([x, y]) => coordKey(x, y) === key);
       if (!isTarget || s.hits.includes(key)) return s;
-      if (round.requireOrder) {
+      if (inSequence(round)) {
         const [ex, ey] = round.targets[s.hits.length];
         if (coordKey(ex, ey) !== key) return s;
       }
       const hits = [...s.hits, key];
-      const beacon = round.requireOrder ? `BEACON ${hits.length}` : `TARGET ${at([a.x, a.y])}`;
+      const beacon = inSequence(round) ? `BEACON ${hits.length}` : `TARGET ${at([a.x, a.y])}`;
       // Under the redesign a shot can only land on the armed cell, so it is spent once it becomes a star.
       const spent = REDESIGN && s.armed !== null && coordKey(s.armed[0], s.armed[1]) === key;
       let next = log(
@@ -461,12 +551,37 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
 
     case 'ADVANCE': {
       if (s.phase !== 'vault') return s;
+      if (REDESIGN) {
+        // Sectors can be finished in any order: win once every fragment is in, otherwise move on.
+        const next = nextUnfinished(s);
+        if (next === null) {
+          const sectors = [...s.sectors];
+          sectors[s.roundIndex] = snapshot(s, 'complete');
+          return { ...s, sectors, phase: 'victory', endedAt: s.endedAt ?? a.now };
+        }
+        return enterSector(s, next, 'complete');
+      }
       if (isLastRound(s)) return { ...s, phase: 'victory', endedAt: s.endedAt ?? a.now };
       return startRound(s, s.roundIndex + 1);
     }
 
+    case 'GOTO_SECTOR':
+      if (!canSwitchSector(s) || a.index === s.roundIndex || a.index < 0 || a.index >= ROUNDS.length) return s;
+      return enterSector(s, a.index);
+
     case 'SKIP': {
       if (s.phase === 'victory' || s.phase === 'lobby') return s;
+      if (REDESIGN) {
+        const hits = currentRound(s).targets.map(([x, y]) => coordKey(x, y));
+        const done = log(withFragment({ ...s, hits }), `STAFF OVERRIDE. SECTOR ${s.roundIndex + 1} BYPASSED`, 'warn');
+        const next = nextUnfinished(done);
+        if (next === null) {
+          const sectors = [...done.sectors];
+          sectors[done.roundIndex] = snapshot(done, 'complete');
+          return { ...done, sectors, phase: 'victory', startedAt: done.startedAt ?? a.now, endedAt: done.endedAt ?? a.now };
+        }
+        return enterSector(done, next, 'complete');
+      }
       const next = log(withFragment(s), `STAFF OVERRIDE. SECTOR ${s.roundIndex + 1} BYPASSED`, 'warn');
       if (isLastRound(s)) {
         return { ...next, phase: 'victory', startedAt: next.startedAt ?? a.now, endedAt: next.endedAt ?? a.now };
@@ -484,6 +599,7 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
         armed: null,
         armedScan: null,
         finalSolved: a.state.finalSolved ?? false,
+        sectors: a.state.sectors ?? ROUNDS.map(() => null),
       };
       return log(restored, 'MISSION RESUMED', 'success');
     }

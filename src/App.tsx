@@ -19,8 +19,10 @@ import {
   masterKey,
   MAX_SCANS,
   MAX_WRONG_HITS,
+  canSwitchSector,
   nextHintLocked,
   sectorLabel,
+  sectorTab,
 } from './game/state';
 import { COORD_LABEL } from './game/grid';
 import { FREE_AIM, REDESIGN } from './game/ruleset';
@@ -44,11 +46,12 @@ import { SpaceBackground } from './components/three/SpaceBackground';
 
 const VAULT_HOLD_MS = 1600;
 /** Phases that come after the constellation lines finish drawing. */
-const LINES_DONE_PHASES: Phase[] = ['identify', 'reveal', 'finale', 'vault', 'victory'];
+const LINES_DONE_PHASES: Phase[] = ['identify', 'reveal', 'finale', 'vault', 'complete', 'victory'];
 const FAILED_HOLD_MS = 3000;
 
 const BANNERS: Partial<Record<Phase, string>> = {
   identify: 'NAME THIS CONSTELLATION IN THE LOG',
+  complete: 'SECTOR COMPLETE · PICK ANOTHER SECTOR',
   failed: 'SHIELDS DOWN. SECTOR RESTARTING',
 };
 
@@ -285,6 +288,11 @@ export default function App() {
     setResume(null);
   }, [resume]);
 
+  const onGoToSector = useCallback((index: number) => {
+    setBoardOpen(false);
+    dispatch({ type: 'GOTO_SECTOR', index });
+  }, []);
+
   const onFinalSolved = useCallback(() => {
     sound.fanfare();
     dispatch({ type: 'FINAL_SOLVED' });
@@ -374,6 +382,9 @@ export default function App() {
                 hitsRemaining={round.targets.length - state.hits.length}
                 misses={state.wrongHits}
                 maxMisses={MAX_WRONG_HITS}
+                sectorTabs={REDESIGN ? ROUNDS.map((_, i) => sectorTab(state, i)) : undefined}
+                canSwitch={canSwitchSector(state)}
+                onGoToSector={onGoToSector}
               />
               <TargetingMatrix handlers={handlers} onReady={setEngine} markable={REDESIGN && phase === 'playing'} />
               <div className="matrix-footer">
