@@ -1,19 +1,14 @@
-import { formatDuration } from '../hooks/useNow';
-
 interface Props {
   sectorNumber: number;
   sectorCount: number;
   sectorName: string;
   hidden: boolean;
-  elapsedMs: number;
-  penaltyMs: number;
-  started: boolean;
   hitsRemaining: number;
   misses: number;
   maxMisses: number;
 }
 
-export function TopBar({ sectorNumber, sectorCount, sectorName, hidden, elapsedMs, penaltyMs, started, hitsRemaining, misses, maxMisses }: Props) {
+export function TopBar({ sectorNumber, sectorCount, sectorName, hidden, hitsRemaining, misses, maxMisses }: Props) {
   const shieldsLeft = Math.max(0, maxMisses - misses);
   return (
     <header className="topbar">
@@ -39,13 +34,6 @@ export function TopBar({ sectorNumber, sectorCount, sectorName, hidden, elapsedM
           {Array.from({ length: maxMisses }, (_, i) => (
             <span key={i} className={i < shieldsLeft ? 'pip on' : 'pip'} />
           ))}
-        </div>
-      </div>
-      <div className="topbar-block right">
-        <div className="label">MISSION TIMER</div>
-        <div className={started ? 'value timer' : 'value timer standby'}>
-          {formatDuration(elapsedMs)}
-          {penaltyMs > 0 && <span className="penalty">+{formatDuration(penaltyMs)}</span>}
         </div>
       </div>
     </header>

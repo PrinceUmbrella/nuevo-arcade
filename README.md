@@ -19,28 +19,27 @@ Designed for a 1920×1080 screen; the layout scales to fit other window sizes.
 | URL | What it's for |
 | --- | --- |
 | `/` | The game (kiosk screen) |
-| `/?view=leaderboard` | Second screen: fastest crews, updates live when opened on the same computer |
 | `/?view=navigator` | Sector 3 beacon clues for the Navigator's phone or tablet (needs `npm run dev:lan`, then open the Network address it prints) |
 
 The navigator view follows the live sector when it runs on the same computer (it says STAND BY until Sector 3). On another device it just shows the clues, so hand it over at Sector 3, or print them.
 
 ## How it plays
 
-A crew enters its team name in the lobby and the mission clock starts. Three sectors (Orion's Belt, Cassiopeia, and a classified third). Players decode clues into (X, Y) cells and shoot only those aliens. X counts left to right, Y counts bottom to top (Y = 1 is the bottom row). The grid sways left and right, so shots need timing; the labels sway with it.
+A crew enters its team name in the lobby and starts the mission. Three sectors (Orion's Belt, Cassiopeia, and a classified third). Players decode clues into (X, Y) cells and shoot only those aliens. X counts left to right, Y counts bottom to top (Y = 1 is the bottom row). The grid sways left and right, so shots need timing; the labels sway with it.
 
 Every alien hides a letter, shown only when it is hit or SCANned. The correct stars spell each sector's key fragment. The master key is **MAP-STARS-POLARIS**.
 
 1. **Orion's Belt (tutorial).** One star is given by facts; the other two each lose a coordinate. After the first hit, players can drag a guide line from a star to find the rest of the belt.
-2. **Cassiopeia.** A pairing board: drag column and row clue cards into five W positions and write each card's number. A mini-map plots the team's numbers live. One column card is interference, and a decoy cell waits where it lands.
+2. **Cassiopeia.** A pairing board: drag randomized column and row clue cards into five W positions and write each card's number. The mini-map plots dots as the team works, then draws the connecting lines once all five pairs are filled. One column card is interference, and a decoy cell waits where it lands.
 3. **Unknown sector (Big Dipper).** Clues are on the Navigator device only; the Gunner fires in sequence as the Navigator reads. The stars spell POLARIS, the team names the constellation, then the POLARIS mothership crosses the top. It only counts when shot over column 1, where the Pointer stars aim.
 
 The full answer key is in the comment at the top of `src/data/constellations.ts`.
 
-- A wrong, decoy, or out-of-sequence hit costs one shield; the alien respawns after 3 seconds.
+- A wrong, decoy, or out-of-sequence hit costs one shield. Consecutive misses lock firing for 2, 5, then 10 seconds. A correct hit resets the streak.
 - SCAN (3 per sector) says whether the armed cell is in the constellation and reveals its letter.
-- Requested hints add 1:00 to the clock. Every 3 misses unlocks a free hint.
-- Losing all 6 shields restarts the current sector; hints, scans and the pairing board are kept.
-- Finished runs go on the leaderboard (stored in this browser's localStorage).
+- Requested hints decrypt for 15, 25, then 40 seconds. The game remains playable during the wait. Every 3 misses unlocks a free hint immediately.
+- Losing all 6 shields starts a 10-second systems reboot before restarting the current sector. Hints, scans and the pairing board are kept.
+- The mission timer stays hidden during play and appears on the victory screen.
 
 ### Player controls
 
@@ -62,8 +61,8 @@ The full answer key is in the comment at the top of `src/data/constellations.ts`
 | Shift+N | Skip to the next sector (awards its key fragment) |
 | Shift+H | Toggle the target overlay (numbered in firing order; decoys marked D) |
 | Shift+V | Show the Navigator clues on the main screen (no second device) |
-| Shift+L | Clear the leaderboard |
+| Shift+C | Cancel the active weapon cooldown and finish any active hint decrypt |
 
 ## Customizing
 
-All puzzle content lives in `src/data/constellations.ts` (targets, letters, lines, clues, board cards, decoys, hints, accepted names, finale). Tuning constants: `MAX_WRONG_HITS`, `MAX_SCANS` and `HINT_PENALTY_MS` in `src/game/state.ts`; `DRIFT_AMPLITUDE` and `DRIFT_PERIOD_S` in `src/game/grid.ts`.
+All puzzle content lives in `src/data/constellations.ts` (targets, letters, lines, clues, board cards, decoys, hints, accepted names, finale). Tuning constants: `MAX_WRONG_HITS`, `MAX_SCANS`, `MISS_COOLDOWN_MS`, `HINT_DECRYPT_MS`, and `REBOOT_MS` in `src/game/state.ts`; `DRIFT_AMPLITUDE` and `DRIFT_PERIOD_S` in `src/game/grid.ts`.

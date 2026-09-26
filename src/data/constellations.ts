@@ -34,9 +34,9 @@
  *                       crosses the top lane; it only counts over `column`.
  *  - cipher             Optional. Clue sections are shown Vigenere-encrypted
  *                       with `key` until players type the key. (Unused now.)
- *  - hints              Revealed in order: on request (+1:00, see
- *                       HINT_PENALTY_MS), or free every 3 misses. 6 misses in
- *                       a sector restarts it (MAX_WRONG_HITS in state.ts).
+ *  - hints              Revealed in order after a decrypt wait, or immediately
+ *                       every 3 misses. 6 misses in a sector starts a reboot
+ *                       before the sector restarts (timings live in state.ts).
  *  - acceptedNames      Answers accepted for hidden rounds. Case, spaces and
  *                       punctuation are ignored.
  *
@@ -112,7 +112,7 @@ export const ROUNDS: Round[] = [
       [3, 4],
     ],
     decoys: [{ cell: [8, 7], letter: 'X' }],
-    // Cards are deliberately shuffled: pairing them in print order gives wrong cells.
+    // The board randomizes both streams whenever the sector starts.
     board: {
       slots: 5,
       columnCards: [

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ROUNDS } from '../data/constellations';
 import { vigenere } from '../game/cipher';
 import { parseCoord } from '../game/grid';
+import { HINT_DECRYPT_MS, type PendingHint } from '../game/state';
 import type { Coord, HintEntry, LogEntry, Phase, Round, ScanResult } from '../game/types';
 import { useTypewriter } from '../hooks/useTypewriter';
 
@@ -18,6 +19,8 @@ interface Props {
   fragments: string[];
   masterKey: string;
   decrypted: boolean;
+  now: number;
+  pendingHint: PendingHint | null;
   onArm: (coord: Coord | null) => void;
   onScan: () => void;
   onOpenBoard: () => void;
@@ -35,13 +38,21 @@ export function AstrometryLog(props: Props) {
   const { round, roundIndex, phase, hints, log, fragments, masterKey, decrypted } = props;
   const mission = useTypewriter(round.missionText);
   const hintsLeft = round.hints.length - hints.length;
-  const canHint = hintsLeft > 0 && (phase === 'playing' || phase === 'identify');
+  const canHint = hintsLeft > 0 && !props.pendingHint && (phase === 'playing' || phase === 'identify');
   const identified = ['reveal', 'finale', 'vault', 'victory'].includes(phase);
   const sectorTitle = round.hiddenName && !identified ? 'CLASSIFIED' : round.name;
   const hintsRef = useRef<HTMLDivElement>(null);
   const encrypted = !!round.cipher && !decrypted;
   const canScan = phase === 'playing' && !!props.armed && props.armedScan === null && props.scansLeft > 0;
   const scanLabel = props.scansLeft === 0 ? 'NONE LEFT' : props.armed ? `${props.scansLeft} LEFT` : 'ARM FIRST';
+  const nextHintWait = HINT_DECRYPT_MS[Math.min(hints.length, HINT_DECRYPT_MS.length - 1)] / 1000;
+  const decryptDuration = props.pendingHint ? props.pendingHint.endsAt - props.pendingHint.startedAt : 0;
+  const decryptProgress = props.pendingHint
+    ? Math.min(1, Math.max(0, (props.now - props.pendingHint.startedAt) / decryptDuration))
+    : 0;
+  const decryptSeconds = props.pendingHint
+    ? Math.min(Math.ceil(decryptDuration / 1000), Math.max(0, Math.ceil((props.pendingHint.endsAt - props.now) / 1000)))
+    : 0;
   // Letters found so far, in target order, e.g. "S _ A _ _".
   const progress = round.targets
     .map(([x, y], i) => (props.hits.includes(`${x},${y}`) ? round.keyFragment[i] : '_'))
@@ -149,6 +160,25 @@ export function AstrometryLog(props: Props) {
         ))}
       </div>
 
+      {props.pendingHint && (
+        <div className="decrypt-wait" aria-live="polite">
+          <div className="decrypt-wait-label">
+            <span>DECRYPTING TRANSMISSION...</span>
+            <span>{decryptSeconds}s</span>
+          </div>
+          <div
+            className="wait-track"
+            role="progressbar"
+            aria-label="Decrypting requested hint"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(decryptProgress * 100)}
+          >
+            <span style={{ transform: `scaleX(${decryptProgress})` }} />
+          </div>
+        </div>
+      )}
+
       <div className="controls">
         {phase === 'identify' ? (
           <IdentifyInput onIdentify={props.onIdentify} />
@@ -182,7 +212,9 @@ export function AstrometryLog(props: Props) {
           }}
         >
           REQUEST HINT
-          <small>{hintsLeft > 0 ? `${hintsLeft} LEFT · +1:00` : 'NONE LEFT'}</small>
+          <small>
+            {props.pendingHint ? 'DECRYPTING...' : hintsLeft > 0 ? `${hintsLeft} LEFT · ${nextHintWait}s` : 'NONE LEFT'}
+          </small>
         </button>
       </div>
 

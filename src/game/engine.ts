@@ -140,6 +140,8 @@ export class GameEngine {
   private inputEnabled = true;
   private flakEnabled = false;
   private lockoutUntil = 0;
+  private cooldownStartedAt = 0;
+  private cooldownEndsAt = 0;
   private shakeUntil = 0;
   private vignetteUntil = 0;
   private armed: Coord | null = null;
@@ -224,6 +226,8 @@ export class GameEngine {
     this.armedScan = null;
     this.rangeRow = 1;
     this.lockoutUntil = 0;
+    this.cooldownStartedAt = 0;
+    this.cooldownEndsAt = 0;
     this.guide = null;
     this.finaleActive = false;
     this.ship = { x: -100, active: false, nextAt: 0 };
@@ -262,6 +266,11 @@ export class GameEngine {
 
   setBanner(text: string | null) {
     this.banner = text;
+  }
+
+  setWeaponCooldown(wait: { startedAt: number; endsAt: number } | null) {
+    this.cooldownStartedAt = wait?.startedAt ?? 0;
+    this.cooldownEndsAt = wait?.endsAt ?? 0;
   }
 
   drawLines() {
@@ -363,7 +372,7 @@ export class GameEngine {
   }
 
   private fire() {
-    if (this.time < this.lockoutUntil) {
+    if (this.time < this.lockoutUntil || Date.now() < this.cooldownEndsAt) {
       this.handlers.onFireBlocked();
       return;
     }
@@ -1015,7 +1024,9 @@ export class GameEngine {
     const { ctx } = this;
     const x = this.cannonX;
     const y = CANNON_Y;
-    const locked = this.time < this.lockoutUntil;
+    const now = Date.now();
+    const recalibrating = now < this.cooldownEndsAt;
+    const locked = recalibrating || this.time < this.lockoutUntil;
     const flicker = locked && Math.floor(this.time * 12) % 2 === 0;
     const color = locked ? (flicker ? '#ff4040' : '#666c78') : '#5dff9d';
     ctx.save();
@@ -1028,11 +1039,24 @@ export class GameEngine {
     ctx.fillRect(x - 3, y - 30, 6, 8);
     ctx.restore();
     if (locked) {
+      const remainingSeconds = recalibrating
+        ? (this.cooldownEndsAt - now) / 1000
+        : this.lockoutUntil - this.time;
+      const label = recalibrating ? 'RECALIBRATING...' : 'WEAPONS OFFLINE';
       ctx.fillStyle = '#ff5c5c';
       ctx.font = `16px ${FONT}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`WEAPONS OFFLINE ${(this.lockoutUntil - this.time).toFixed(1)}s`, clamp(x, 170, W - 170), y + 36);
+      const labelX = clamp(x, 190, W - 190);
+      ctx.fillText(`${label} ${remainingSeconds.toFixed(1)}s`, labelX, y + 34);
+      if (recalibrating) {
+        const duration = this.cooldownEndsAt - this.cooldownStartedAt;
+        const progress = duration > 0 ? clamp((now - this.cooldownStartedAt) / duration, 0, 1) : 1;
+        ctx.strokeStyle = '#ff5c5c';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(labelX - 150, y + 48, 300, 10);
+        ctx.fillRect(labelX - 148, y + 50, 296 * progress, 6);
+      }
     }
   }
 

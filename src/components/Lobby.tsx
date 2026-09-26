@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LeaderboardEntry } from '../game/leaderboard';
 import { TEAM_NAME_MAX } from '../game/state';
-import { LeaderboardList } from './LeaderboardList';
 
-export function Lobby({ entries, onStart }: { entries: LeaderboardEntry[]; onStart: (team: string) => void }) {
+export function Lobby({ onStart }: { onStart: (team: string) => void }) {
   const [team, setTeam] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -18,8 +16,7 @@ export function Lobby({ entries, onStart }: { entries: LeaderboardEntry[]; onSta
           THE CONSTELLATION GRID
         </h1>
         <p className="lobby-brief">
-          Three firewalls. Decode each constellation, shoot only its stars, and assemble the master key. Fastest crew
-          tops the board.
+          Three firewalls. Decode each constellation, shoot only its stars, and assemble the master key.
         </p>
         <form
           className="term-input lobby-form"
@@ -45,12 +42,8 @@ export function Lobby({ entries, onStart }: { entries: LeaderboardEntry[]; onSta
             </button>
           </div>
         </form>
-        <p className="lobby-note">The mission clock starts when you press Start. Requested hints add 1:00.</p>
+        <p className="lobby-note">Wrong shots lock the cannon. Requested hints take time to decrypt.</p>
       </div>
-      <aside className="lobby-board" aria-label="Fastest crews">
-        <h2>FASTEST CREWS</h2>
-        <LeaderboardList entries={entries} limit={8} />
-      </aside>
     </div>
   );
 }

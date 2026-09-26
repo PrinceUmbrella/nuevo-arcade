@@ -46,12 +46,13 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
     return x >= 1 && x <= 8 && y >= 1 && y <= 8 ? { i, x, y } : null;
   });
   const toMap = (x: number, y: number) => [(x - 0.5) * MAP_CELL, MAP_SIZE - (y - 0.5) * MAP_CELL] as const;
-  const segments = points.flatMap((p, i) => {
+  const allPairsFilled = points.every((p) => p !== null);
+  const segments = allPairsFilled ? points.flatMap((p, i) => {
     const q = points[i + 1];
     return p && q ? [[toMap(p.x, p.y), toMap(q.x, q.y)] as const] : [];
-  });
+  }) : [];
 
-  const unusedCols = config.columnCards.map((_, c) => c).filter((c) => slotOf('col', c) === -1);
+  const unusedCols = state.colOrder.filter((card) => slotOf('col', card) === -1);
   const allColsPlaced = state.colSlots.every((c) => c !== null);
 
   const renderCard = (kind: Kind, text: string, card: number) => {
@@ -130,11 +131,11 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
         <div className="pairing-body">
           <section className="card-pool" aria-label="Column stream">
             <h3>COLUMN STREAM</h3>
-            <ul>{config.columnCards.map((t, i) => renderCard('col', t, i))}</ul>
+            <ul>{state.colOrder.map((card) => renderCard('col', config.columnCards[card], card))}</ul>
           </section>
           <section className="card-pool" aria-label="Row stream">
             <h3>ROW STREAM</h3>
-            <ul>{config.rowCards.map((t, i) => renderCard('row', t, i))}</ul>
+            <ul>{state.rowOrder.map((card) => renderCard('row', config.rowCards[card], card))}</ul>
           </section>
 
           <section className="pairing-side">
