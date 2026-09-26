@@ -149,7 +149,7 @@ export const ROUNDS: Round[] = [
         'Number of Lagrange points in a two-body system',
         "Saturn's position from the Sun",
         'Number of astronauts on the Apollo 11 crew',
-        "Number of sisters in the Pleiades' nickname, the Seven Sisters",
+        "Number of sisters in the Pleiades' nickname",
         'Number of rocky (terrestrial) planets',
       ],
     },

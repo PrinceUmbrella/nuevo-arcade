@@ -27,11 +27,11 @@ The navigator view follows the live sector when it runs on the same computer (it
 
 ## How it plays
 
-A crew enters its team name in the lobby and starts the mission. There is no clock and no leaderboard: crews take as long as they need. Three sectors (Orion's Belt, Cassiopeia, and a classified third). Players decode clues into (X, Y) cells, arm each answer, and shoot only those aliens. X counts left to right, Y counts bottom to top (Y = 1 is the bottom row).
+A crew enters its team name in the lobby and starts the mission. There is no clock and no leaderboard: crews take as long as they need. Three sectors (Orion's Belt, Cassiopeia, and a classified third). Players decode clues into (X, Y) cells, arm each answer, and shoot only those targets. The grid is filled with pixel-art Nuvi, the Nuevo Foundation mascot, redrawn from the Python Pixel workshop art (classic rules keep the original invaders). X counts left to right, Y counts bottom to top (Y = 1 is the bottom row).
 
-The puzzle is the deduction; the shot is the payoff. The cannon only fires at the armed cell. Players line up LOCK by moving the cannon under the target's column and setting the row by hand, and a line above the grid says what to do next. A shot fired without LOCK is deflected: no shield lost, nothing revealed, a 1.5-second cooldown. Orion's Belt holds still with no enemy fire so crews can learn this. In Cassiopeia and the third sector the grid sways left and right (the labels sway with it) and aliens drop flak that knocks weapons offline for 2 seconds.
+The puzzle is the deduction; the shot is the payoff. The cannon only fires at the armed cell. Players line up LOCK by moving the cannon under the target's column and setting the row by hand, and a line above the grid says what to do next. A shot fired without LOCK is deflected: no shield lost, nothing revealed, a 1.5-second cooldown. Orion's Belt holds still with no enemy fire so crews can learn this. In Cassiopeia and the third sector the grid sways left and right (the labels sway with it) and the grid drops flak that knocks weapons offline for 2 seconds.
 
-Every alien hides a letter, shown only when it is hit or SCANned. The correct stars spell each sector's key fragment. The master key is **MAP-STARS-POLARIS**.
+Every Nuvi hides a letter, shown only when it is hit or SCANned. The correct stars spell each sector's key fragment. The master key is **MAP-STARS-POLARIS**.
 
 1. **Orion's Belt (tutorial).** One star is given by facts; the other two each lose a coordinate. After the first hit, players can drag a guide line from a star to find the rest of the belt.
 2. **Cassiopeia.** A pairing board: drag column and row clue cards into five W positions and write each card's number. A mini-map plots the team's numbers live. One column card is interference, and a decoy cell waits where it lands.
@@ -39,7 +39,7 @@ Every alien hides a letter, shown only when it is hit or SCANned. The correct st
 
 The full answer key is in the comment at the top of `src/data/constellations.ts`.
 
-- A locked shot at a wrong, decoy, or out-of-sequence cell costs one shield; the alien respawns after 3 seconds.
+- A locked shot at a wrong, decoy, or out-of-sequence cell costs one shield; the target respawns after 3 seconds.
 - SCAN (3 per sector) says whether the armed cell is in the constellation and reveals its letter.
 - Pencil marks: click a cell, or type `M X,Y` in ARM TARGET, to drop a numbered mark (up to 8). `M CLEAR` removes them. Marks are a scratchpad only and never count as shots.
 - Hints are free: 3 per sector, revealed in order on request. Every 3 misses also unlocks the next one automatically. The third hint in each sector gives a star away, so it stays locked until the crew makes at least one wrong deduction in that sector (a deflected shot doesn't count). A sector restart keeps it unlocked.

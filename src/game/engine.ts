@@ -87,8 +87,55 @@ const ALIEN_FRAMES = [
   ['..X.....X..', '...X...X...', '..XXXXXXX..', '.XX.XXX.XX.', 'XXXXXXXXXXX', 'X.XXXXXXX.X', 'X.X.....X.X', '...XX.XX...'],
   ['..X.....X..', 'X..X...X..X', 'X.XXXXXXX.X', 'XXX.XXX.XXX', 'XXXXXXXXXXX', '.XXXXXXXXX.', '..X.....X..', '.X.......X.'],
 ];
+/**
+ * Nuvi, the Nuevo Foundation mascot, redrawn from the pixel-art Nuvi in the Python Pixel workshop
+ * (NuevoFoundation/workshops, content/english/python-pixel/media/pixel-nuvi.png). X is the body in
+ * the sector color, D a darker shade, V the visor, E the eyes. Frame 2 raises the arms and rolls the wheel.
+ */
+const NUVI_FRAMES = [
+  [
+    '.......XXXXX.......',
+    '.....XXXXXXXXX.....',
+    '..XXXXXXXXXXXXXXX..',
+    '..XVVVVVVVVVVVVVXDD',
+    '.XXVVEVVVVVVVEVVXDD',
+    '.XXVVEVVVVVVVEVVXDD',
+    '..XVVVVVVVVVVVVVXDD',
+    '..XXXXXXXXXXXXXXX..',
+    '........DDD........',
+    '......XXXXXXX......',
+    '.....XXXXXXXXX.....',
+    'XXDDXXXXXXXXXXXDDXX',
+    'XX..XXXXXXXXXXX..XX',
+    '.....XXXXXXXXX.....',
+    '......DDVDDDD......',
+  ],
+  [
+    '.......XXXXX.......',
+    '.....XXXXXXXXX.....',
+    '..XXXXXXXXXXXXXXX..',
+    '..XVVVVVVVVVVVVVXDD',
+    '.XXVVEVVVVVVVEVVXDD',
+    '.XXVVEVVVVVVVEVVXDD',
+    '..XVVVVVVVVVVVVVXDD',
+    '..XXXXXXXXXXXXXXX..',
+    '........DDD........',
+    'XX....XXXXXXX....XX',
+    'XXDDDXXXXXXXXXDDDXX',
+    '....XXXXXXXXXXX....',
+    '....XXXXXXXXXXX....',
+    '.....XXXXXXXXX.....',
+    '......DDDDVDD......',
+  ],
+];
 const SHIP_FRAME = ['.....XXXXXX.....', '...XXXXXXXXXX...', '..XXXXXXXXXXXX..', '.XX.XX.XX.XX.XX.', 'XXXXXXXXXXXXXXXX', '..XXX..XX..XXX..', '...X........X...'];
 const ALIEN_PX = 5;
+const NUVI_PX = 3;
+/** Grid sprites: Nuvi under the redesign, the original invaders with ?rules=classic. */
+const ENEMY_FRAMES = REDESIGN ? NUVI_FRAMES : ALIEN_FRAMES;
+const ENEMY_PX = REDESIGN ? NUVI_PX : ALIEN_PX;
+const VISOR_COLOR = '#04070f';
+const EYE_COLOR = '#ffc93c';
 const SHIP_PX = 5;
 const SPRITE_PAD = 14;
 const BULLET_SPEED = 1100;
@@ -119,14 +166,22 @@ function makeSprite(frame: string[], color: string, px = ALIEN_PX): HTMLCanvasEl
   c.width = frame[0].length * px + SPRITE_PAD * 2;
   c.height = frame.length * px + SPRITE_PAD * 2;
   const ctx = c.getContext('2d')!;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 10;
-  ctx.fillStyle = color;
-  frame.forEach((row, ry) =>
-    [...row].forEach((ch, rx) => {
-      if (ch === 'X') ctx.fillRect(SPRITE_PAD + rx * px, SPRITE_PAD + ry * px, px, px);
-    }),
-  );
+  // One pass per palette key. Invader and ship frames only use X, so they render exactly as before.
+  const paint = (key: string, fill: string, glow: number, alpha = 1) => {
+    ctx.shadowColor = fill;
+    ctx.shadowBlur = glow;
+    ctx.fillStyle = fill;
+    ctx.globalAlpha = alpha;
+    frame.forEach((row, ry) =>
+      [...row].forEach((ch, rx) => {
+        if (ch === key) ctx.fillRect(SPRITE_PAD + rx * px, SPRITE_PAD + ry * px, px, px);
+      }),
+    );
+  };
+  paint('X', color, 10);
+  paint('D', color, 0, 0.5);
+  paint('V', VISOR_COLOR, 0);
+  paint('E', EYE_COLOR, 6);
   return c;
 }
 
@@ -189,7 +244,7 @@ export class GameEngine {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d')!;
     this.handlers = handlers;
-    this.redSprites = ALIEN_FRAMES.map((f) => makeSprite(f, '#ff2a2a'));
+    this.redSprites = ENEMY_FRAMES.map((f) => makeSprite(f, '#ff2a2a', ENEMY_PX));
     this.shipSprite = makeSprite(SHIP_FRAME, SHIP_COLOR, SHIP_PX);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(canvas.parentElement!);
@@ -230,7 +285,7 @@ export class GameEngine {
     this.letters = buildLetterGrid(round);
     this.revealed = new Set();
     this.hitCount = 0;
-    this.sprites = ALIEN_FRAMES.map((f) => makeSprite(f, round.alienColor));
+    this.sprites = ENEMY_FRAMES.map((f) => makeSprite(f, round.alienColor, ENEMY_PX));
     this.cells = [];
     for (let y = 1; y <= GRID_SIZE; y++) {
       for (let x = 1; x <= GRID_SIZE; x++) {

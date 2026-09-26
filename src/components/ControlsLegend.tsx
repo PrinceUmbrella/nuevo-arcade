@@ -61,7 +61,7 @@ function RedesignControls() {
         X counts left to right. Y counts bottom to top. <b>Y = 1 is the bottom row.</b>
       </p>
       <p>
-        Every alien hides a letter, and the right stars spell a word. Hitting a cell that isn&apos;t in the
+        Every Nuvi hides a letter, and the right stars spell a word. Hitting a cell that isn&apos;t in the
         constellation costs one shield, and every 3 misses unlocks the next hint. Hints are free and there&apos;s no
         clock, but the last hint in each sector gives a star away, so it unlocks only after a wrong answer. Lose all{' '}
         {MAX_WRONG_HITS} shields and the sector restarts, but you keep your hints, scans, and marks.
