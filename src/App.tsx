@@ -288,6 +288,8 @@ export default function App() {
     setResume(null);
   }, [resume]);
 
+  const onBoardHelpSeen = useCallback(() => dispatch({ type: 'BOARD_HELP_SEEN' }), []);
+
   const onGoToSector = useCallback((index: number) => {
     setBoardOpen(false);
     dispatch({ type: 'GOTO_SECTOR', index });
@@ -459,6 +461,8 @@ export default function App() {
                 onPlace={onBoardPlace}
                 onValue={onBoardValue}
                 onClose={() => setBoardOpen(false)}
+                nudgeHelp={REDESIGN && !state.boardHelpSeen}
+                onHelpSeen={onBoardHelpSeen}
               />
             )}
             {phase === 'lobby' &&

@@ -13,6 +13,9 @@ interface Props {
   onPlace: (kind: Kind, card: number, slot: number | null) => void;
   onValue: (kind: Kind, card: number, value: string) => void;
   onClose: () => void;
+  /** Redesign: first visit to the board, so the help button flashes to catch the crew's eye. */
+  nudgeHelp?: boolean;
+  onHelpSeen?: () => void;
 }
 
 const MAP_CELL = 40;
@@ -21,12 +24,18 @@ const label = (kind: Kind, card: number) => `${kind === 'col' ? 'C' : 'R'}${card
 const DRAG_TYPE = 'application/x-constellation-card';
 
 /** Sector 2: drag clue cards into W positions; the mini-map plots the numbers the team wrote. */
-export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props) {
+export function PairingBoard({ config, state, onPlace, onValue, onClose, nudgeHelp = false, onHelpSeen }: Props) {
   const [selected, setSelected] = useState<{ kind: Kind; card: number } | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const helpButtonRef = useRef<HTMLButtonElement>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  // Captured when the board opens: keeps flashing for this whole visit, even after it's recorded as seen.
+  const [flashHelp, setFlashHelp] = useState(nudgeHelp);
   useDialogFocus(closeRef, REDESIGN);
+
+  useEffect(() => {
+    if (nudgeHelp) onHelpSeen?.();
+  }, [nudgeHelp, onHelpSeen]);
 
   const closeHelp = () => {
     setHelpOpen(false);
@@ -151,9 +160,24 @@ export function PairingBoard({ config, state, onPlace, onValue, onClose }: Props
             </p>
           )}
           {REDESIGN && (
-            <button type="button" className="pairing-help-btn" ref={helpButtonRef} onClick={() => setHelpOpen(true)}>
+            <button
+              type="button"
+              className={flashHelp ? 'pairing-help-btn attention' : 'pairing-help-btn'}
+              ref={helpButtonRef}
+              aria-label="How it works: a walkthrough of the pairing board"
+              aria-describedby={flashHelp ? 'board-help-new' : undefined}
+              onClick={() => {
+                setFlashHelp(false);
+                setHelpOpen(true);
+              }}
+            >
               ? HOW IT WORKS
             </button>
+          )}
+          {REDESIGN && flashHelp && (
+            <span id="board-help-new" className="visually-hidden">
+              New here? Start with this walkthrough.
+            </span>
           )}
           <button type="button" className="pairing-close" ref={closeRef} onClick={onClose}>
             BACK TO GRID (ESC)

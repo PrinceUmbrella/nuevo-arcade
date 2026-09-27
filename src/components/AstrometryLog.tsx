@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { ROUNDS } from '../data/constellations';
 import { vigenere } from '../game/cipher';
+import { copyText, selectText } from '../game/clipboard';
 import { COORD_LABEL, formatCoord, parseCoord } from '../game/grid';
 import { FREE_AIM, REDESIGN } from '../game/ruleset';
 import { MAX_MARKS, roundClues, roundHints, roundMissionText } from '../game/state';
@@ -103,9 +104,7 @@ export function AstrometryLog(props: Props) {
                 ? 'Your Navigator reads the beacons aloud. The Gunner stays at this screen and locks them in any order.'
                 : 'Your Navigator reads the beacons aloud. The Gunner stays at this screen and fires in sequence.'}
             </p>
-            <p className="navigator-url">
-              Navigator link: <NavigatorLink />
-            </p>
+            <NavigatorLink />
           </div>
         ) : (
           sections.map((section) => {
@@ -433,20 +432,71 @@ function Vault({
   );
 }
 
-/** Opens the Navigator view in a new tab, keeping the rule set so both screens show the same clues. */
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * The Navigator page's full URL. When the kiosk opens the game at localhost, a phone can't use that
+ * address, so the LAN address from the dev server is used instead when one is known.
+ */
+function navigatorUrl() {
+  const { protocol, hostname, port } = window.location;
+  const local = LOCAL_HOSTS.includes(hostname);
+  const host = local && __LAN_HOST__ ? __LAN_HOST__ : hostname;
+  const url = `${protocol}//${host}${port ? `:${port}` : ''}/?view=navigator${REDESIGN ? '' : '&rules=classic'}`;
+  return { url, phoneReady: !local || !!__LAN_HOST__ };
+}
+
+type CopyState = 'idle' | 'copied' | 'manual';
+
+/** The Navigator link (opens in a new tab) plus a button that copies it to send to the Navigator's phone. */
 export function NavigatorLink() {
-  const href = `/?view=navigator${REDESIGN ? '' : '&rules=classic'}`;
+  const { url, phoneReady } = navigatorUrl();
+  const [copy, setCopy] = useState<CopyState>('idle');
+  const linkRef = useRef<HTMLAnchorElement>(null);
+  const timer = useRef(0);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  const onCopy = async () => {
+    const ok = await copyText(url);
+    if (!ok) selectText(linkRef.current);
+    setCopy(ok ? 'copied' : 'manual');
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopy('idle'), ok ? 1800 : 5000);
+  };
+
   return (
-    <a
-      className="navigator-link"
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      // Keeps focus off the link so SPACE still fires after clicking it.
-      onMouseDown={(e) => e.preventDefault()}
-    >
-      {window.location.host}
-      {href}
-    </a>
+    <div className="navigator-url">
+      <span>Navigator link:</span>
+      <a
+        ref={linkRef}
+        className="navigator-link"
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        // Keeps focus off the link so SPACE still fires after clicking it.
+        onMouseDown={(e) => e.preventDefault()}
+      >
+        {url.replace(/^https?:\/\//, '')}
+      </a>
+      <button
+        type="button"
+        className={`link-copy ${copy}`}
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.currentTarget.blur();
+          void onCopy();
+        }}
+      >
+        {copy === 'copied' ? 'COPIED ✓' : copy === 'manual' ? 'SELECTED: PRESS CTRL+C' : 'COPY LINK'}
+      </button>
+      <span className="visually-hidden" aria-live="polite">
+        {copy === 'copied' ? 'Navigator link copied' : copy === 'manual' ? 'Link selected. Press Control C to copy.' : ''}
+      </span>
+      {!phoneReady && (
+        <p className="navigator-local">
+          This address only works on this computer. For a phone link, staff can start the game with npm run dev:lan.
+        </p>
+      )}
+    </div>
   );
 }

@@ -85,6 +85,8 @@ export interface GameState {
   sectorMissed: boolean;
   /** Redesign: the crew answered the look-up question on the victory screen. */
   finalSolved: boolean;
+  /** Redesign: the crew has opened the pairing board once, so its help button stops flashing. */
+  boardHelpSeen: boolean;
   /**
    * Redesign: progress in each sector, so crews can jump between sectors without losing work.
    * The active sector lives in the top-level fields; this slot is refreshed whenever they leave it.
@@ -121,6 +123,7 @@ export type GameAction =
   | { type: 'RESTORE'; state: GameState }
   | { type: 'FINAL_SOLVED' }
   | { type: 'GOTO_SECTOR'; index: number }
+  | { type: 'BOARD_HELP_SEEN' }
   | { type: 'RESET' };
 
 export const currentRound = (s: GameState): Round => ROUNDS[s.roundIndex];
@@ -259,6 +262,7 @@ export function createInitialState(epoch = 0): GameState {
     marks: [],
     sectorMissed: false,
     finalSolved: false,
+    boardHelpSeen: false,
     sectors: ROUNDS.map(() => null),
     log: [],
     nextLogId: 1,
@@ -565,6 +569,9 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
       return startRound(s, s.roundIndex + 1);
     }
 
+    case 'BOARD_HELP_SEEN':
+      return s.boardHelpSeen ? s : { ...s, boardHelpSeen: true };
+
     case 'GOTO_SECTOR':
       if (!canSwitchSector(s) || a.index === s.roundIndex || a.index < 0 || a.index >= ROUNDS.length) return s;
       return enterSector(s, a.index);
@@ -600,6 +607,7 @@ export function gameReducer(s: GameState, a: GameAction): GameState {
         armedScan: null,
         finalSolved: a.state.finalSolved ?? false,
         sectors: a.state.sectors ?? ROUNDS.map(() => null),
+        boardHelpSeen: a.state.boardHelpSeen ?? false,
       };
       return log(restored, 'MISSION RESUMED', 'success');
     }

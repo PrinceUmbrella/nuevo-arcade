@@ -24,6 +24,10 @@ Designed for a 1920×1080 screen; the layout scales to fit other window sizes. T
 | `/?aim=free` | Redesign plus free aim: with nothing armed, Space arms the cell under the reticle and the next Space fires |
 | `/?rules=classic` | The original rules and copy, for before/after comparison with the redesign (the default). `aim` is ignored |
 
+In Sector 3 the log panel shows the Navigator link with a **COPY LINK** button, so staff can send it to the Navigator's phone. Under `npm run dev:lan` the link uses this computer's Wi-Fi address even when the kiosk opened the game at `localhost`. Under plain `npm run dev` it says the address only works on this computer.
+
+The first time a crew opens the Cassiopeia pairing board, its **? HOW IT WORKS** button is highlighted with a pulsing ring until they open it.
+
 The navigator view follows the live sector when it runs on the same computer (it says STAND BY until Sector 3). On another device it just shows the clues, so hand it over at Sector 3, or print them.
 
 ## How it plays

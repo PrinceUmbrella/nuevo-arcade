@@ -71,6 +71,7 @@ function isValidState(s: GameState): boolean {
   if (!isInt(s.sectorRestarts) || !isInt(s.penaltyMs)) return false;
   // Added after the first saves shipped, so an older save may not have these yet.
   if (s.finalSolved !== undefined && typeof s.finalSolved !== 'boolean') return false;
+  if (s.boardHelpSeen !== undefined && typeof s.boardHelpSeen !== 'boolean') return false;
   if (s.sectors !== undefined) {
     if (!Array.isArray(s.sectors) || s.sectors.length !== ROUNDS.length) return false;
     const ok = s.sectors.every(
